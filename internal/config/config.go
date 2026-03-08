@@ -10,6 +10,7 @@ type Config struct {
 	ListenAddr        string
 	DatabasePath      string
 	GeoIPDBPath       string
+	ClassifierPath    string
 	CountryBlacklist  map[string]struct{}
 	InitialAPIKeys    []string
 	TrustProxyHeaders bool
@@ -24,6 +25,7 @@ func LoadFromEnv() Config {
 		ListenAddr:        getString("LISTEN_ADDR", ":8080"),
 		DatabasePath:      getString("DATABASE_PATH", "./storage/llm_guard.db"),
 		GeoIPDBPath:       getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
+		ClassifierPath:    getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
 		CountryBlacklist:  toSetCSV(getString("COUNTRY_BLACKLIST", "")),
 		InitialAPIKeys:    toListCSV(getString("INITIAL_API_KEYS", "")),
 		TrustProxyHeaders: getBool("TRUST_PROXY_HEADERS", false),

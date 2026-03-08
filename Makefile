@@ -6,7 +6,7 @@ ARCHES := amd64 arm64
 CURRENT_OS := $(shell go env GOOS)
 CURRENT_ARCH := $(shell go env GOARCH)
 
-.PHONY: all build release clean
+.PHONY: all build release clean train-prepare train-model validate-model smoke
 
 all: build
 
@@ -30,3 +30,18 @@ release:
 
 clean:
 	rm -rf $(DIST_DIR)
+
+train-prepare:
+	python3 -m uv run --project training python training/prepare_dataset.py --dataset-profile clean --out-dir training/data --oasst-benign-limit 30000 --min-safe-rows 20000
+
+train-model:
+	python3 -m uv run --project training python training/train_classifier.py --train training/data/train.jsonl --val training/data/val.jsonl --out models/classifier_v1.json --metrics-out training/artifacts/classifier_v1_metrics.json
+
+validate-model:
+	@test -f models/classifier_v1.json || (echo "missing model: models/classifier_v1.json" && exit 1)
+	@go test ./internal/classifier -run TestPredictWithTrainedModel -count=1
+	@go test ./internal/safety/rules -run TestClassifierRuleWithTrainedModel -count=1
+
+smoke:
+	@test -n "$(API_KEY)" || (echo "set API_KEY before running make smoke" && exit 1)
+	@bash scripts/smoke.sh

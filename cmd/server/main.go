@@ -11,6 +11,7 @@ import (
 
 	"llm_guard/internal/api"
 	"llm_guard/internal/auth"
+	"llm_guard/internal/classifier"
 	"llm_guard/internal/config"
 	"llm_guard/internal/geoip"
 	"llm_guard/internal/safety"
@@ -47,10 +48,16 @@ func main() {
 	}
 
 	engine := safety.NewEngine(cfg.FailClosed, cfg.RiskThreshold)
-	engine.Register(rules.NewPromptInjectionRule())
-	engine.Register(rules.NewExfiltrationRule())
-	engine.Register(rules.NewHostTakeoverRule())
 	engine.Register(rules.NewCountryBlacklistRule(cfg.CountryBlacklist, cfg.FailClosed))
+	if cfg.ClassifierPath == "" {
+		log.Fatal("classifier path is required")
+	}
+	clf, err := classifier.Load(cfg.ClassifierPath)
+	if err != nil {
+		log.Fatalf("load classifier path=%s: %v", cfg.ClassifierPath, err)
+	}
+	engine.Register(rules.NewClassifierRule(clf))
+	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
 
 	router := api.NewRouter(api.Dependencies{
 		Config:          cfg,

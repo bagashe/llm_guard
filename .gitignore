@@ -2,3 +2,7 @@ dist/
 tmp/
 storage/*.db
 storage/*.mmdb
+models/*.json
+training/data/
+training/.venv/
+training/artifacts/

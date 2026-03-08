@@ -7,7 +7,7 @@ Go service for pre-filtering LLM user input with API key auth and extensible saf
 - REST API protected by Bearer API keys stored in SQLite
 - `POST /v1/evaluate` returns `safe` boolean, `reasons`, and `risk_score`
 - Fail-closed policy support (`FAIL_CLOSED=true`)
-- Extensible rule engine (keyword-based injection/exfiltration/takeover checks)
+- Extensible rule engine with classifier-based malicious-intent detection
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 
 ## Quick start
@@ -43,9 +43,12 @@ export DATABASE_PATH=./storage/llm_guard.db
 export INITIAL_API_KEYS=dev-key-1
 export COUNTRY_BLACKLIST=KP,IR
 export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
+export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
 export TRUST_PROXY_HEADERS=true
 ```
+
+`CLASSIFIER_PATH` is required. Server startup fails if the model file is missing or invalid.
 
 2. Run the service:
 
@@ -90,18 +93,53 @@ curl -X POST http://localhost:8080/v1/evaluate \
   "safe": false,
   "reasons": [
     {
-      "rule_id": "prompt_injection.override_instructions",
+      "rule_id": "classifier.malicious_intent",
       "severity": "high",
-      "detail": "detected prompt-injection override pattern"
+      "detail": "classifier flagged labels: prompt_injection=0.98"
     }
   ],
-  "risk_score": 0.55
+  "risk_score": 0.98
 }
 ```
 
 ## Extending safeguards
 
 Add new rule implementations under `internal/safety/rules` by implementing `safety.Rule` and registering in `cmd/server/main.go`.
+
+## Classifier training
+
+Training assets live in `training/` and model artifacts live in `models/`.
+
+Quick start:
+
+```bash
+python3 -m uv sync --project training
+python3 -m uv run --project training python training/prepare_dataset.py --dataset-profile clean --out-dir training/data --oasst-benign-limit 30000 --min-safe-rows 20000
+python3 -m uv run --project training python training/train_classifier.py --train training/data/train.jsonl --val training/data/val.jsonl --out models/classifier_v1.json --metrics-out training/artifacts/classifier_v1_metrics.json
+make validate-model
+```
+
+Detailed steps are in `training/README.md`.
+
+Generated artifacts are intentionally not committed:
+
+- `models/*.json`
+- `training/data/`
+- `training/artifacts/`
+
+## Smoke Test
+
+Use the bundled smoke script against a running server:
+
+```bash
+API_KEY=your-key make smoke
+```
+
+Optional overrides:
+
+```bash
+BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
+```
 
 Examples of future rules:
 

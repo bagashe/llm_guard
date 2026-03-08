@@ -6,3 +6,4 @@ models/*.json
 training/data/
 training/.venv/
 training/artifacts/
+training/__pycache__/

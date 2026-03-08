@@ -1,0 +1,22 @@
+services:
+  llm_guard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm_guard
+    ports:
+      - "8080:8080"
+    environment:
+      LISTEN_ADDR: "${LISTEN_ADDR:-:8080}"
+      DATABASE_PATH: "${DATABASE_PATH:-/app/storage/llm_guard.db}"
+      INITIAL_API_KEYS: "${INITIAL_API_KEYS:-dev-key-1}"
+      CLASSIFIER_PATH: "${CLASSIFIER_PATH:-/app/models/classifier_v1.json}"
+      GEOIP_DB_PATH: "${GEOIP_DB_PATH:-/app/storage/GeoLite2-Country.mmdb}"
+      COUNTRY_BLACKLIST: "${COUNTRY_BLACKLIST:-}"
+      FAIL_CLOSED: "${FAIL_CLOSED:-true}"
+      TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-false}"
+      RATE_LIMIT_RPS: "${RATE_LIMIT_RPS:-10}"
+      RATE_LIMIT_BURST: "${RATE_LIMIT_BURST:-20}"
+    volumes:
+      - ./storage:/app/storage
+    restart: unless-stopped

@@ -6,7 +6,7 @@ ARCHES := amd64 arm64
 CURRENT_OS := $(shell go env GOOS)
 CURRENT_ARCH := $(shell go env GOARCH)
 
-.PHONY: all build release clean train-prepare train-model validate-model smoke
+.PHONY: all build release clean train-prepare train-model validate-model smoke docker-build docker-up docker-down
 
 all: build
 
@@ -45,3 +45,12 @@ validate-model:
 smoke:
 	@test -n "$(API_KEY)" || (echo "set API_KEY before running make smoke" && exit 1)
 	@bash scripts/smoke.sh
+
+docker-build:
+	docker build -t llm_guard:latest .
+
+docker-up:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down

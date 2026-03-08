@@ -13,6 +13,66 @@ Go service for pre-filtering LLM user input with API key auth and extensible saf
 
 ## Quick start
 
+### Configure environment with `.env`
+
+The server and `apikeyctl` automatically load variables from `.env` if present.
+
+```bash
+cp .env.example .env
+```
+
+Precedence is:
+
+1. Existing process environment variables
+2. Values from `.env`
+3. Built-in defaults in code
+
+Use `.env` for local development only; do not commit real secrets.
+
+### Run with Docker Compose
+
+Build and start:
+
+```bash
+docker compose up --build -d
+```
+
+Tail logs:
+
+```bash
+docker compose logs -f llm_guard
+```
+
+Docker Compose reads `.env` for variable substitution. Exported shell variables override `.env` values.
+
+The default compose value bootstraps `INITIAL_API_KEYS=dev-key-1` so you can test quickly:
+
+```bash
+curl -X POST http://localhost:8080/v1/evaluate \
+  -H "Authorization: Bearer dev-key-1" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","message_type":"user"}'
+```
+
+Stop and remove containers and local state:
+
+```bash
+docker compose down
+rm -f ./storage/llm_guard.db
+```
+
+Manage API keys from inside the container:
+
+```bash
+docker compose exec llm_guard apikeyctl list -db /app/storage/llm_guard.db
+docker compose exec llm_guard apikeyctl create -db /app/storage/llm_guard.db -name service-a
+docker compose exec llm_guard apikeyctl revoke -db /app/storage/llm_guard.db -name service-a
+```
+
+`TRUST_PROXY_HEADERS` defaults to `false`. Set it to `true` only when traffic arrives through a trusted reverse proxy that sanitizes forwarding headers.
+
+`dev-key-1` is for local development convenience only. Replace it before running in shared or production environments.
+
 ### GeoLite2 database setup (required for country lookup)
 
 This service uses MaxMind GeoLite2 Country data (`.mmdb`) for IP-to-country mapping.
@@ -26,6 +86,8 @@ mkdir -p storage
 mv /path/to/GeoLite2-Country.mmdb ./storage/GeoLite2-Country.mmdb
 ```
 
+With Docker Compose bind mounts, this host path is available in the container as `/app/storage/GeoLite2-Country.mmdb`.
+
 If you do not want GeoIP lookups, set `GEOIP_DB_PATH` to an empty value before starting the server.
 
 ### Licensing and compliance requirements
@@ -36,7 +98,7 @@ You are responsible for complying with MaxMind's GeoLite2 license terms when dow
 - Ensure your use, redistribution, and any required notices/attribution comply with MaxMind's terms.
 - Do not commit the `.mmdb` file to source control unless your usage rights explicitly allow it.
 
-1. Set environment variables:
+1. Set environment variables (or use `.env`):
 
 ```bash
 export LISTEN_ADDR=:8080
@@ -46,7 +108,7 @@ export COUNTRY_BLACKLIST=KP,IR
 export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
 export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
-export TRUST_PROXY_HEADERS=true
+export TRUST_PROXY_HEADERS=false
 ```
 
 `CLASSIFIER_PATH` is required. Server startup fails if the model file is missing or invalid.

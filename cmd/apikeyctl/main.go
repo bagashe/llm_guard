@@ -12,10 +12,14 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"llm_guard/internal/storage/sqlite"
 )
 
 func main() {
+	_ = godotenv.Load()
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(2)

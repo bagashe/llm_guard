@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"llm_guard/internal/api"
 	"llm_guard/internal/auth"
 	"llm_guard/internal/classifier"
@@ -21,6 +23,8 @@ import (
 )
 
 func main() {
+	_ = godotenv.Load()
+
 	cfg := config.LoadFromEnv()
 
 	db, err := sqlite.OpenAndInit(cfg.DatabasePath)

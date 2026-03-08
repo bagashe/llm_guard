@@ -4,3 +4,4 @@ storage/*.db
 storage/*.mmdb
 training/.venv/
 training/__pycache__/
+.env

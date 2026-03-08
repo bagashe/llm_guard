@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import regex
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
@@ -19,6 +20,16 @@ LABELS = [
     "exfiltration_intent",
     "host_takeover_or_jailbreak",
 ]
+
+TOKEN_PATTERN = r"[\p{L}\p{N}_]+"
+TOKENIZER_LOWERCASE = True
+
+TOKEN_REGEX = regex.compile(TOKEN_PATTERN)
+
+
+def tokenize_text(text: str) -> list[str]:
+    value = text.lower() if TOKENIZER_LOWERCASE else text
+    return TOKEN_REGEX.findall(value)
 
 
 def read_jsonl(path: Path):
@@ -75,9 +86,11 @@ def main() -> None:
     x_val, y_val = to_xy(val_rows)
 
     vectorizer = CountVectorizer(
-        lowercase=True,
+        lowercase=False,
         max_features=args.max_features,
-        token_pattern=r"(?u)\b\w+\b",
+        tokenizer=tokenize_text,
+        preprocessor=None,
+        token_pattern=None,
     )
     x_train_vec = vectorizer.fit_transform(x_train)
     x_val_vec = vectorizer.transform(x_val)
@@ -117,6 +130,11 @@ def main() -> None:
     out = {
         "version": "v1",
         "labels": LABELS,
+        "tokenizer": {
+            "type": "regex",
+            "pattern": TOKEN_PATTERN,
+            "lowercase": TOKENIZER_LOWERCASE,
+        },
         "vocab": vocab,
         "weights": weights,
         "bias": bias,

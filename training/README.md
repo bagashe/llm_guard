@@ -48,6 +48,8 @@ python3 -m uv run --project training python training/train_classifier.py \
 The output model is consumed by the Go service through `CLASSIFIER_PATH`.
 Metrics are saved to `training/artifacts/classifier_v1_metrics.json`.
 
+Tokenizer configuration is exported into the model file and must stay in parity with Go inference. The tokenizer is Unicode-aware (`[\p{L}\p{N}_]+`). Parity fixtures are stored in `training/tokenizer_fixtures.json` and validated by Go tests.
+
 ## 3) Run server with model
 
 ```bash

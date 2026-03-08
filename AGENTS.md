@@ -44,3 +44,4 @@ Examples of planned additions:
 - Log request outcomes consistently for observability.
 - Preserve compatibility of public API response fields.
 - Keep secrets out of logs and source control.
+- Keep tokenizer parity between training and inference: the Go tokenizer must implement the exact same algorithm/config used during Python training, and parity tests must be updated with any tokenizer changes.

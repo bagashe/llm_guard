@@ -3,6 +3,7 @@ package classifier
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"regexp"
@@ -10,15 +11,27 @@ import (
 	"strings"
 )
 
-var wordPattern = regexp.MustCompile(`[A-Za-z0-9_]+`)
+const (
+	defaultTokenizerType      = "regex"
+	defaultTokenizerPattern   = `[\p{L}\p{N}_]+`
+	defaultTokenizerLowercase = true
+)
+
+type TokenizerConfig struct {
+	Type      string `json:"type"`
+	Pattern   string `json:"pattern"`
+	Lowercase bool   `json:"lowercase"`
+}
 
 type Model struct {
 	Version    string               `json:"version"`
 	Labels     []string             `json:"labels"`
+	Tokenizer  TokenizerConfig      `json:"tokenizer"`
 	Vocab      map[string]int       `json:"vocab"`
 	Weights    map[string][]float64 `json:"weights"`
 	Bias       map[string]float64   `json:"bias"`
 	Thresholds map[string]float64   `json:"thresholds"`
+	tokenRE    *regexp.Regexp
 }
 
 type Prediction struct {
@@ -39,6 +52,11 @@ func Load(path string) (*Model, error) {
 	if len(m.Labels) == 0 || len(m.Vocab) == 0 {
 		return nil, errors.New("invalid model: labels and vocab are required")
 	}
+
+	if err := m.initTokenizer(); err != nil {
+		return nil, err
+	}
+
 	if len(m.Thresholds) == 0 {
 		m.Thresholds = make(map[string]float64, len(m.Labels))
 		for _, label := range m.Labels {
@@ -64,9 +82,35 @@ func Load(path string) (*Model, error) {
 	return &m, nil
 }
 
+func (m *Model) initTokenizer() error {
+	if m.Tokenizer.Type == "" {
+		m.Tokenizer.Type = defaultTokenizerType
+	}
+	if m.Tokenizer.Pattern == "" {
+		m.Tokenizer.Pattern = defaultTokenizerPattern
+	}
+	if m.Tokenizer.Type != defaultTokenizerType {
+		return fmt.Errorf("invalid tokenizer type: %s", m.Tokenizer.Type)
+	}
+	re, err := regexp.Compile(m.Tokenizer.Pattern)
+	if err != nil {
+		return fmt.Errorf("invalid tokenizer pattern: %w", err)
+	}
+	m.tokenRE = re
+	if m.Tokenizer.Pattern == defaultTokenizerPattern && !m.Tokenizer.Lowercase {
+		m.Tokenizer.Lowercase = defaultTokenizerLowercase
+	}
+	return nil
+}
+
 func (m *Model) Predict(text string) []Prediction {
+	if m.tokenRE == nil {
+		if err := m.initTokenizer(); err != nil {
+			return nil
+		}
+	}
 	features := make(map[int]float64)
-	for _, token := range tokenize(text) {
+	for _, token := range m.tokenize(text) {
 		idx, ok := m.Vocab[token]
 		if !ok {
 			continue
@@ -93,8 +137,11 @@ func (m *Model) Predict(text string) []Prediction {
 	return out
 }
 
-func tokenize(text string) []string {
-	parts := wordPattern.FindAllString(strings.ToLower(text), -1)
+func (m *Model) tokenize(text string) []string {
+	if m.Tokenizer.Lowercase {
+		text = strings.ToLower(text)
+	}
+	parts := m.tokenRE.FindAllString(text, -1)
 	if len(parts) == 0 {
 		return nil
 	}

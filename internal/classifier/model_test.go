@@ -1,7 +1,10 @@
 package classifier
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -40,6 +43,18 @@ func TestPredictWithTrainedModel(t *testing.T) {
 	}
 }
 
+func TestTokenizerParityFixtures(t *testing.T) {
+	m := mustLoadRepoModel(t)
+	fixtures := mustLoadTokenizerFixtures(t)
+
+	for _, tc := range fixtures {
+		tokens := m.tokenize(tc.Input)
+		if !reflect.DeepEqual(tokens, tc.Tokens) {
+			t.Fatalf("token mismatch for input %q\n got:  %#v\n want: %#v", tc.Input, tokens, tc.Tokens)
+		}
+	}
+}
+
 func mustLoadRepoModel(t *testing.T) *Model {
 	t.Helper()
 
@@ -67,4 +82,33 @@ func scoreByLabel(t *testing.T, m *Model, text string) map[string]float64 {
 		out[pred.Label] = pred.Score
 	}
 	return out
+}
+
+type tokenizerFixture struct {
+	Input  string   `json:"input"`
+	Tokens []string `json:"tokens"`
+}
+
+func mustLoadTokenizerFixtures(t *testing.T) []tokenizerFixture {
+	t.Helper()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to resolve test file path")
+	}
+
+	fixturesPath := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "training", "tokenizer_fixtures.json"))
+	b, err := os.ReadFile(fixturesPath)
+	if err != nil {
+		t.Fatalf("read tokenizer fixtures at %s: %v", fixturesPath, err)
+	}
+
+	var fixtures []tokenizerFixture
+	if err := json.Unmarshal(b, &fixtures); err != nil {
+		t.Fatalf("unmarshal tokenizer fixtures: %v", err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("tokenizer fixtures cannot be empty")
+	}
+	return fixtures
 }

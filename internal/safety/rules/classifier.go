@@ -25,6 +25,9 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	if r.model == nil {
 		return safety.Match{}, nil
 	}
+	if in.MessageType != safety.MessageTypeUser {
+		return safety.Match{}, nil
+	}
 
 	preds := r.model.Predict(in.Message)
 	flagged := make([]string, 0)

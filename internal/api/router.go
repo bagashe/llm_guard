@@ -73,8 +73,6 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_type must be one of: user, system, tool_call"})
 		return
 	}
-	req.MessageType = strings.TrimSpace(req.MessageType)
-
 	// Message-type policy notes:
 	// - user: run the full safety engine (classifier + policy rules).
 	// - system: currently pass-through as safe=true, to be expanded later.

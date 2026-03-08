@@ -5,8 +5,17 @@ import (
 	"strings"
 )
 
+type MessageType string
+
+const (
+	MessageTypeUser     MessageType = "user"
+	MessageTypeSystem   MessageType = "system"
+	MessageTypeToolCall MessageType = "tool_call"
+)
+
 type Input struct {
 	Message     string
+	MessageType MessageType
 	ClientIP    string
 	CountryCode string
 }

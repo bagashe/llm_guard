@@ -24,8 +24,9 @@ type Dependencies struct {
 }
 
 type evaluateRequest struct {
-	Message string `json:"message"`
-	Context struct {
+	Message     string `json:"message"`
+	MessageType string `json:"message_type"`
+	Context     struct {
 		ClientSignals struct {
 			IP        string `json:"ip"`
 			UserAgent string `json:"user_agent"`
@@ -68,13 +69,31 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
+	if !isValidMessageType(req.MessageType) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_type must be one of: user, system, tool_call"})
+		return
+	}
+	req.MessageType = strings.TrimSpace(req.MessageType)
+
+	// Message-type policy notes:
+	// - user: run the full safety engine (classifier + policy rules).
+	// - system: currently pass-through as safe=true, to be expanded later.
+	//   Future checks could include policy leakage markers, unsafe instruction
+	//   generation, sensitive data reflection, and response-policy drift.
+	// - tool_call: currently pass-through as safe=true, to be expanded later.
+	//   Future checks could include strict JSON/schema validation, tool allow/
+	//   deny lists, argument risk scanning, and per-tool semantic validators.
+	if req.MessageType == string(safety.MessageTypeSystem) || req.MessageType == string(safety.MessageTypeToolCall) {
+		writeJSON(w, http.StatusOK, safety.Result{Safe: true, Reasons: []safety.Reason{}, RiskScore: 0})
+		return
+	}
 
 	ipStr := strings.TrimSpace(req.Context.ClientSignals.IP)
 	if ipStr == "" {
 		ipStr = extractClientIP(r, dep.Config.TrustProxyHeaders)
 	}
 
-	resultInput := safety.Input{Message: req.Message, ClientIP: ipStr}
+	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: ipStr}
 	if ipStr != "" {
 		if ip := net.ParseIP(ipStr); ip != nil {
 			code, err := dep.CountryResolver.CountryCode(ip)
@@ -99,6 +118,15 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 
 	res := dep.Engine.Evaluate(r.Context(), resultInput)
 	writeJSON(w, http.StatusOK, res)
+}
+
+func isValidMessageType(v string) bool {
+	switch safety.MessageType(strings.TrimSpace(v)) {
+	case safety.MessageTypeUser, safety.MessageTypeSystem, safety.MessageTypeToolCall:
+		return true
+	default:
+		return false
+	}
 }
 
 func extractClientIP(r *http.Request, trustProxy bool) string {

@@ -80,6 +80,16 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) Result {
 
 		result.Reasons = append(result.Reasons, match.Reason)
 		result.RiskScore += match.Score
+		if isTerminalCountryBlock(match.Reason.RuleID) {
+			result.Safe = false
+			if result.RiskScore < 0 {
+				result.RiskScore = 0
+			}
+			if result.RiskScore > 1 {
+				result.RiskScore = 1
+			}
+			return result
+		}
 		if strings.EqualFold(strings.TrimSpace(match.Reason.Severity), "high") {
 			hasHighSeverity = true
 		}
@@ -97,4 +107,8 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) Result {
 	}
 
 	return result
+}
+
+func isTerminalCountryBlock(ruleID string) bool {
+	return ruleID == "country_blacklist.blocked_country" || ruleID == "country_blacklist.unknown_country"
 }

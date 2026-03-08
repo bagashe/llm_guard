@@ -6,8 +6,9 @@ import (
 )
 
 type testRule struct {
-	match Match
-	err   error
+	match  Match
+	err    error
+	onEval func()
 }
 
 func (r testRule) ID() string {
@@ -15,6 +16,9 @@ func (r testRule) ID() string {
 }
 
 func (r testRule) Evaluate(_ context.Context, _ Input) (Match, error) {
+	if r.onEval != nil {
+		r.onEval()
+	}
 	return r.match, r.err
 }
 
@@ -99,5 +103,28 @@ func TestEngineClampsRiskScoreAndThreshold(t *testing.T) {
 	}
 	if res.Safe {
 		t.Fatalf("expected unsafe result with clamped threshold and score; got %+v", res)
+	}
+}
+
+func TestEngineShortCircuitsOnCountryBlock(t *testing.T) {
+	engine := NewEngine(true, 0.70)
+	called := 0
+	engine.Register(testRule{match: Match{
+		Matched: true,
+		Score:   1.0,
+		Reason: Reason{
+			RuleID:   "country_blacklist.blocked_country",
+			Severity: "high",
+			Detail:   "request country is blacklisted",
+		},
+	}})
+	engine.Register(testRule{onEval: func() { called++ }})
+
+	res := engine.Evaluate(context.Background(), Input{Message: "hello"})
+	if res.Safe {
+		t.Fatalf("expected unsafe result for country block; got %+v", res)
+	}
+	if called != 0 {
+		t.Fatalf("expected classifier-like rule to be skipped after country block, called=%d", called)
 	}
 }

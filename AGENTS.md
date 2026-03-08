@@ -35,7 +35,7 @@ Examples of planned additions:
 ## Non-goals
 
 - This service is not an LLM orchestration layer.
-- This service is not responsible for model inference.
+- This service is not responsible for downstream LLM inference.
 - This service should not expose sensitive internals in error responses.
 
 ## Operational principles

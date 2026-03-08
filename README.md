@@ -9,6 +9,7 @@ Go service for pre-filtering LLM user input with API key auth and extensible saf
 - Fail-closed policy support (`FAIL_CLOSED=true`)
 - Extensible rule engine with classifier-based malicious-intent detection
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
+- Country blacklist short-circuits evaluation before classifier scoring
 
 ## Quick start
 
@@ -121,11 +122,12 @@ make validate-model
 
 Detailed steps are in `training/README.md`.
 
-Generated artifacts are intentionally not committed:
+Training/model artifacts are tracked in this repository:
 
-- `models/*.json`
-- `training/data/`
-- `training/artifacts/`
+- `models/classifier_v1.json`
+- `training/data/train.jsonl`
+- `training/data/val.jsonl`
+- `training/artifacts/classifier_v1_metrics.json`
 
 ## Smoke Test
 

@@ -136,7 +136,7 @@ func runList(args []string) error {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tACTIVE\tCREATED_AT\tLAST_USED_AT")
+	fmt.Fprintln(tw, "ID\tNAME\tACTIVE\tCREATED_AT\tLAST_USED_AT\tUSAGE_COUNT")
 	for _, k := range keys {
 		lastUsed := ""
 		if k.LastUsedAt != nil {
@@ -144,12 +144,13 @@ func runList(args []string) error {
 		}
 		fmt.Fprintf(
 			tw,
-			"%d\t%s\t%s\t%s\t%s\n",
+			"%d\t%s\t%s\t%s\t%s\t%d\n",
 			k.ID,
 			k.Name,
 			strconv.FormatBool(k.Active),
 			k.CreatedAt.UTC().Format(time.RFC3339),
 			lastUsed,
+			k.UsageCount,
 		)
 	}
 	return tw.Flush()

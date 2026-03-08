@@ -14,6 +14,7 @@ import (
 	"llm_guard/internal/classifier"
 	"llm_guard/internal/config"
 	"llm_guard/internal/geoip"
+	"llm_guard/internal/ratelimit"
 	"llm_guard/internal/safety"
 	"llm_guard/internal/safety/rules"
 	"llm_guard/internal/storage/sqlite"
@@ -59,11 +60,16 @@ func main() {
 	engine.Register(rules.NewClassifierRule(clf))
 	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
 
+	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
+	defer limiter.Stop()
+	log.Printf("rate limiter enabled rps=%.1f burst=%d", cfg.RateLimitRPS, cfg.RateLimitBurst)
+
 	router := api.NewRouter(api.Dependencies{
-		Config:          cfg,
-		Engine:          engine,
-		AuthMiddleware:  auth.BearerMiddleware(validator),
-		CountryResolver: countryResolver,
+		Config:              cfg,
+		Engine:              engine,
+		AuthMiddleware:      auth.BearerMiddleware(validator),
+		RateLimitMiddleware: limiter.Middleware,
+		CountryResolver:     countryResolver,
 	})
 
 	srv := &http.Server{

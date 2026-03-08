@@ -16,10 +16,11 @@ import (
 )
 
 type Dependencies struct {
-	Config          config.Config
-	Engine          *safety.Engine
-	AuthMiddleware  func(http.Handler) http.Handler
-	CountryResolver geoip.Resolver
+	Config              config.Config
+	Engine              *safety.Engine
+	AuthMiddleware      func(http.Handler) http.Handler
+	RateLimitMiddleware func(http.Handler) http.Handler
+	CountryResolver     geoip.Resolver
 }
 
 type evaluateRequest struct {
@@ -42,6 +43,9 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Use(dep.AuthMiddleware)
+		if dep.RateLimitMiddleware != nil {
+			v1.Use(dep.RateLimitMiddleware)
+		}
 		v1.Post("/evaluate", func(w http.ResponseWriter, r *http.Request) {
 			handleEvaluate(w, r, dep)
 		})

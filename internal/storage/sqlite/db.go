@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -34,11 +35,20 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	key_hash TEXT NOT NULL UNIQUE,
 	active INTEGER NOT NULL DEFAULT 1,
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	last_used_at DATETIME
+	last_used_at DATETIME,
+	usage_count INTEGER NOT NULL DEFAULT 0
 );
 `
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+
+	const addUsageCount = `ALTER TABLE api_keys ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0`
+	_, err := db.Exec(addUsageCount)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 type APIKeyStore struct {
@@ -51,6 +61,7 @@ type APIKeyRecord struct {
 	Active     bool
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
+	UsageCount int64
 }
 
 func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
@@ -69,7 +80,7 @@ func (s *APIKeyStore) IsValidAPIKey(ctx context.Context, rawKey string) (bool, e
 		return false, err
 	}
 
-	const touch = `UPDATE api_keys SET last_used_at = ? WHERE id = ?`
+	const touch = `UPDATE api_keys SET last_used_at = ?, usage_count = usage_count + 1 WHERE id = ?`
 	_, _ = s.db.ExecContext(ctx, touch, time.Now().UTC(), id)
 	return true, nil
 }
@@ -125,7 +136,7 @@ func (s *APIKeyStore) RevokeAPIKeyByName(ctx context.Context, name string) (bool
 
 func (s *APIKeyStore) ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error) {
 	const q = `
-SELECT id, name, active, created_at, last_used_at
+SELECT id, name, active, created_at, last_used_at, usage_count
 FROM api_keys
 ORDER BY id ASC
 `
@@ -140,7 +151,7 @@ ORDER BY id ASC
 		var rec APIKeyRecord
 		var activeInt int
 		var lastUsed sql.NullTime
-		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed, &rec.UsageCount); err != nil {
 			return nil, err
 		}
 		rec.Active = activeInt == 1

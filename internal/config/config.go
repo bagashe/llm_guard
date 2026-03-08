@@ -17,6 +17,8 @@ type Config struct {
 	FailClosed        bool
 	RiskThreshold     float64
 	MaxBodyBytes      int64
+	RateLimitRPS      float64
+	RateLimitBurst    int
 }
 
 func LoadFromEnv() Config {
@@ -32,6 +34,8 @@ func LoadFromEnv() Config {
 		FailClosed:        getBool("FAIL_CLOSED", true),
 		RiskThreshold:     getFloat("RISK_THRESHOLD", 0.70),
 		MaxBodyBytes:      maxBody,
+		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
 	}
 }
 

@@ -30,12 +30,12 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	flagged := make([]string, 0)
 	maxScore := 0.0
 	for _, pred := range preds {
-		if pred.Score > maxScore {
-			maxScore = pred.Score
-		}
 		threshold := r.model.Thresholds[pred.Label]
 		if pred.Score >= threshold {
 			flagged = append(flagged, fmt.Sprintf("%s=%.3f", pred.Label, pred.Score))
+			if pred.Score > maxScore {
+				maxScore = pred.Score
+			}
 		}
 	}
 

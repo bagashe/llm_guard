@@ -49,5 +49,5 @@ func (r *MMDBResolver) Close() error {
 type NoopResolver struct{}
 
 func (NoopResolver) CountryCode(_ net.IP) (string, error) {
-	return "", errors.New("geoip disabled")
+	return "", nil
 }

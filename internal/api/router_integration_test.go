@@ -175,13 +175,13 @@ func newTestRouter(t *testing.T, opts testRouterOptions) http.Handler {
 
 	validator := auth.NewValidator(store)
 	engine := safety.NewEngine(true, 0.70)
-	engine.Register(rules.NewClassifierRule(testClassifierModel()))
 
 	blacklist := opts.countryBlacklist
 	if blacklist == nil {
 		blacklist = map[string]struct{}{}
 	}
 	engine.Register(rules.NewCountryBlacklistRule(blacklist, true))
+	engine.Register(rules.NewClassifierRule(testClassifierModel()))
 
 	cfg := config.Config{
 		FailClosed:        true,

@@ -86,7 +86,7 @@ def main() -> None:
     x_val, y_val = to_xy(val_rows)
 
     vectorizer = CountVectorizer(
-        lowercase=False,
+        lowercase=TOKENIZER_LOWERCASE,
         max_features=args.max_features,
         tokenizer=tokenize_text,
         preprocessor=None,

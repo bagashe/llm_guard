@@ -70,7 +70,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		return
 	}
 	if !isValidMessageType(req.MessageType) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_type must be one of: user, system, tool_call"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_type must be one of: user, system, tool_call, assistant"})
 		return
 	}
 	// Message-type policy notes:
@@ -120,7 +120,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 
 func isValidMessageType(v string) bool {
 	switch safety.MessageType(strings.TrimSpace(v)) {
-	case safety.MessageTypeUser, safety.MessageTypeSystem, safety.MessageTypeToolCall:
+	case safety.MessageTypeUser, safety.MessageTypeSystem, safety.MessageTypeToolCall, safety.MessageTypeAssistant:
 		return true
 	default:
 		return false

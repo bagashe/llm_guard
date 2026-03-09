@@ -1,15 +1,19 @@
 # llm_guard
 
-Go service for pre-filtering LLM user input with API key auth and extensible safety rules.
+Go service for evaluating LLM input and output with API key auth, per-key rate limiting, and extensible safety rules.
 
 ## Features
 
 - REST API protected by Bearer API keys stored in SQLite
-- `POST /v1/evaluate` requires `message_type` (`user`, `system`, `tool_call`) and returns `safe`, `reasons`, and `risk_score`
+- `POST /v1/evaluate` requires `message_type` (`user`, `system`, `tool_call`, `assistant`) and returns `safe`, `reasons`, and `risk_score`
 - Fail-closed policy support (`FAIL_CLOSED=true`)
 - Extensible rule engine with classifier-based malicious-intent detection
+- Output scanning: leaked system prompt detection and secret/credential detection (regex + Shannon entropy)
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 - Country blacklist short-circuits evaluation before classifier scoring
+- Per-key rate limiting (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
+- Per-key usage tracking in the database
+- `.env` file support for configuration
 
 ## Quick start
 
@@ -109,6 +113,8 @@ export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
 export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
 export TRUST_PROXY_HEADERS=false
+export RATE_LIMIT_RPS=10
+export RATE_LIMIT_BURST=20
 ```
 
 `CLASSIFIER_PATH` is required. Server startup fails if the model file is missing or invalid.
@@ -154,7 +160,8 @@ curl -X POST http://localhost:8080/v1/evaluate \
 
 `message_type` behavior:
 
-- `user`: full safety evaluation is applied.
+- `user`: full input safety evaluation (classifier, country blacklist).
+- `assistant`: output scanning (system prompt leak detection, secret/credential detection).
 - `system`: currently pass-through (`safe=true`) while system-output checks are being added.
 - `tool_call`: currently pass-through (`safe=true`) while tool invocation checks are being added.
 
@@ -212,9 +219,19 @@ Optional overrides:
 BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
 ```
 
+## Safety rules
+
+| Rule | Message type | Description |
+|------|-------------|-------------|
+| `country_blacklist.blocked_country` | all | Blocks requests from blacklisted countries (short-circuits) |
+| `classifier.malicious_intent` | `user` | ML classifier for prompt injection, exfiltration, host takeover |
+| `output.system_prompt_leak` | `assistant` | Regex detection of leaked system prompts / internal instructions |
+| `output.secret_leak` | `assistant` | Regex + entropy detection of credentials, API keys, private keys |
+
 Examples of future rules:
 
-- Country and ASN policies
-- Bag-of-words and regex risk filters
-- Role-aware policy checks
+- PII detection/redaction on input
+- Embedding-based jailbreak similarity
+- Multi-turn context tracking
 - Tool invocation allowlists/denylists
+- Code execution payload blocking in output

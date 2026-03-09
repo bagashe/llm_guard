@@ -8,9 +8,10 @@ import (
 type MessageType string
 
 const (
-	MessageTypeUser     MessageType = "user"
-	MessageTypeSystem   MessageType = "system"
-	MessageTypeToolCall MessageType = "tool_call"
+	MessageTypeUser      MessageType = "user"
+	MessageTypeSystem    MessageType = "system"
+	MessageTypeToolCall  MessageType = "tool_call"
+	MessageTypeAssistant MessageType = "assistant"
 )
 
 type Input struct {

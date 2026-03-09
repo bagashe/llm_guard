@@ -63,6 +63,9 @@ func main() {
 	}
 	engine.Register(rules.NewClassifierRule(clf))
 	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
+	engine.Register(rules.NewSystemPromptLeakRule())
+	engine.Register(rules.NewSecretLeakRule())
+	log.Println("output scanning rules registered: system_prompt_leak, secret_leak")
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	defer limiter.Stop()

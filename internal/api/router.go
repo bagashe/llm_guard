@@ -28,12 +28,6 @@ type Dependencies struct {
 type evaluateRequest struct {
 	Message     string `json:"message"`
 	MessageType string `json:"message_type"`
-	Context     struct {
-		ClientSignals struct {
-			IP        string `json:"ip"`
-			UserAgent string `json:"user_agent"`
-		} `json:"client_signals"`
-	} `json:"context"`
 }
 
 func NewRouter(dep Dependencies) http.Handler {

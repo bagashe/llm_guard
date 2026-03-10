@@ -32,6 +32,6 @@ ENV LISTEN_ADDR=:8080 \
     DOMAIN_BLACKLIST_PATH=/app/config/domain_blacklist.txt \
     GEOIP_DB_PATH=/app/storage/GeoLite2-Country.mmdb \
     FAIL_CLOSED=true \
-    TRUST_PROXY_HEADERS=false
+    TRUST_PROXY_HEADERS=true
 
 ENTRYPOINT ["/usr/local/bin/server"]

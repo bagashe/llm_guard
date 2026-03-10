@@ -24,7 +24,7 @@ func (r CountryBlacklistRule) Evaluate(_ context.Context, in safety.Input) (safe
 		return safety.Match{}, nil
 	}
 
-	if safety.IsLoopbackIP(in.ClientIP) {
+	if safety.IsPrivateOrLocalIP(in.ClientIP) {
 		return safety.Match{}, nil
 	}
 

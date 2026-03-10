@@ -75,7 +75,7 @@ docker compose exec llm_guard apikeyctl create -db /app/storage/llm_guard.db -na
 docker compose exec llm_guard apikeyctl revoke -db /app/storage/llm_guard.db -name service-a
 ```
 
-`TRUST_PROXY_HEADERS` defaults to `false`. Set it to `true` only when traffic arrives through a trusted reverse proxy that sanitizes forwarding headers.
+`TRUST_PROXY_HEADERS` defaults to `true` so the server reads `X-Forwarded-For` / `X-Real-IP` headers for client IP resolution (required when running behind Docker or a reverse proxy). Set to `false` only when the server is directly exposed without a proxy, to prevent IP spoofing via forged headers.
 
 `dev-key-1` is for local development convenience only. Replace it before running in shared or production environments.
 
@@ -115,7 +115,7 @@ export DOMAIN_BLACKLIST_PATH=./config/domain_blacklist.txt
 export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
 export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
-export TRUST_PROXY_HEADERS=false
+export TRUST_PROXY_HEADERS=true
 export RATE_LIMIT_RPS=10
 export RATE_LIMIT_BURST=20
 ```

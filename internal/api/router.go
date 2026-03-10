@@ -38,7 +38,7 @@ type evaluateRequest struct {
 
 func NewRouter(dep Dependencies) http.Handler {
 	r := chi.NewRouter()
-	r.Use(requestLoggingMiddleware)
+	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -91,16 +91,11 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 	}
 
 	sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
-	isLocalhost := safety.IsLoopbackIP(sourceIP)
-
-	ipStr := strings.TrimSpace(req.Context.ClientSignals.IP)
-	if ipStr == "" {
-		ipStr = sourceIP
-	}
+	isLocal := safety.IsPrivateOrLocalIP(sourceIP)
 
 	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP}
-	if ipStr != "" && !isLocalhost {
-		if ip := net.ParseIP(ipStr); ip != nil {
+	if sourceIP != "" && !isLocal {
+		if ip := net.ParseIP(sourceIP); ip != nil {
 			code, err := dep.CountryResolver.CountryCode(ip)
 			if err != nil {
 				if dep.Config.FailClosed {
@@ -216,39 +211,45 @@ func (r *statusRecorder) setAuditToolCallDetails(message string) {
 	r.toolArgs = args
 }
 
-func requestLoggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+			clientIP := extractClientIP(r, trustProxyHeaders)
+			if clientIP == "" {
+				clientIP = r.RemoteAddr
+			}
 
-		safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
-		messageTypeField := "na"
-		if rec.messageType != "" {
-			messageTypeField = rec.messageType
-		}
-		toolNameField := "na"
-		toolArgsField := "na"
-		if rec.toolName != "" {
-			toolNameField = rec.toolName
-		}
-		if rec.toolArgs != "" {
-			toolArgsField = rec.toolArgs
-		}
-		log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
-			r.Method,
-			r.URL.Path,
-			rec.status,
-			time.Since(start).Milliseconds(),
-			r.RemoteAddr,
-			messageTypeField,
-			toolNameField,
-			toolArgsField,
-			safeField,
-			riskScoreField,
-			reasonIDsField,
-		)
-	})
+			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
+			messageTypeField := "na"
+			if rec.messageType != "" {
+				messageTypeField = rec.messageType
+			}
+			toolNameField := "na"
+			toolArgsField := "na"
+			if rec.toolName != "" {
+				toolNameField = rec.toolName
+			}
+			if rec.toolArgs != "" {
+				toolArgsField = rec.toolArgs
+			}
+			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
+				r.Method,
+				r.URL.Path,
+				rec.status,
+				time.Since(start).Milliseconds(),
+				clientIP,
+				messageTypeField,
+				toolNameField,
+				toolArgsField,
+				safeField,
+				riskScoreField,
+				reasonIDsField,
+			)
+		})
+	}
 }
 
 type auditMessageTypeSetter interface {

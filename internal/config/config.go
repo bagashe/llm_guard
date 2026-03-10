@@ -32,7 +32,7 @@ func LoadFromEnv() Config {
 		CountryBlacklist:    toSetCSV(getString("COUNTRY_BLACKLIST", "")),
 		DomainBlacklistPath: getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
 		InitialAPIKeys:      toListCSV(getString("INITIAL_API_KEYS", "")),
-		TrustProxyHeaders:   getBool("TRUST_PROXY_HEADERS", false),
+		TrustProxyHeaders:   getBool("TRUST_PROXY_HEADERS", true),
 		FailClosed:          getBool("FAIL_CLOSED", true),
 		RiskThreshold:       getFloat("RISK_THRESHOLD", 0.70),
 		MaxBodyBytes:        maxBody,

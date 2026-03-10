@@ -339,10 +339,35 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 			t.Fatalf("unexpected response: %+v", res)
 		}
 	})
+
+	t.Run("returns safe false for tool_call to blacklisted domain", func(t *testing.T) {
+		h := newTestRouter(t, testRouterOptions{domainBlacklist: map[string]struct{}{"evil.com": {}}})
+		body := map[string]any{
+			"message":      `{"tool":"browser.open","arguments":{"url":"https://login.evil.com"}}`,
+			"message_type": "tool_call",
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if res.Safe {
+			t.Fatalf("expected safe=false for blacklisted tool_call domain, got: %+v", res)
+		}
+		if len(res.Reasons) == 0 || res.Reasons[0].RuleID != "tool_call.domain_blacklist" {
+			t.Fatalf("unexpected reasons: %+v", res.Reasons)
+		}
+	})
 }
 
 type testRouterOptions struct {
 	countryBlacklist map[string]struct{}
+	domainBlacklist  map[string]struct{}
 	geoCode          string
 	geoErr           error
 }
@@ -376,6 +401,7 @@ func newTestRouter(t *testing.T, opts testRouterOptions) http.Handler {
 		blacklist = map[string]struct{}{}
 	}
 	engine.Register(rules.NewCountryBlacklistRule(blacklist, true))
+	engine.Register(rules.NewToolCallDomainBlacklistRule(opts.domainBlacklist))
 	engine.Register(rules.NewClassifierRule(testClassifierModel()))
 	engine.Register(rules.NewPIIDetectionRule())
 	engine.Register(rules.NewSystemPromptLeakRule())

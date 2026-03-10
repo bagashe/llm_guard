@@ -7,35 +7,37 @@ import (
 )
 
 type Config struct {
-	ListenAddr        string
-	DatabasePath      string
-	GeoIPDBPath       string
-	ClassifierPath    string
-	CountryBlacklist  map[string]struct{}
-	InitialAPIKeys    []string
-	TrustProxyHeaders bool
-	FailClosed        bool
-	RiskThreshold     float64
-	MaxBodyBytes      int64
-	RateLimitRPS      float64
-	RateLimitBurst    int
+	ListenAddr          string
+	DatabasePath        string
+	GeoIPDBPath         string
+	ClassifierPath      string
+	CountryBlacklist    map[string]struct{}
+	DomainBlacklistPath string
+	InitialAPIKeys      []string
+	TrustProxyHeaders   bool
+	FailClosed          bool
+	RiskThreshold       float64
+	MaxBodyBytes        int64
+	RateLimitRPS        float64
+	RateLimitBurst      int
 }
 
 func LoadFromEnv() Config {
 	maxBody := int64(getInt("MAX_BODY_BYTES", 1<<20))
 	return Config{
-		ListenAddr:        getString("LISTEN_ADDR", ":8080"),
-		DatabasePath:      getString("DATABASE_PATH", "./storage/llm_guard.db"),
-		GeoIPDBPath:       getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
-		ClassifierPath:    getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
-		CountryBlacklist:  toSetCSV(getString("COUNTRY_BLACKLIST", "")),
-		InitialAPIKeys:    toListCSV(getString("INITIAL_API_KEYS", "")),
-		TrustProxyHeaders: getBool("TRUST_PROXY_HEADERS", false),
-		FailClosed:        getBool("FAIL_CLOSED", true),
-		RiskThreshold:     getFloat("RISK_THRESHOLD", 0.70),
-		MaxBodyBytes:      maxBody,
-		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
-		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
+		ListenAddr:          getString("LISTEN_ADDR", ":8080"),
+		DatabasePath:        getString("DATABASE_PATH", "./storage/llm_guard.db"),
+		GeoIPDBPath:         getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
+		ClassifierPath:      getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
+		CountryBlacklist:    toSetCSV(getString("COUNTRY_BLACKLIST", "")),
+		DomainBlacklistPath: getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
+		InitialAPIKeys:      toListCSV(getString("INITIAL_API_KEYS", "")),
+		TrustProxyHeaders:   getBool("TRUST_PROXY_HEADERS", false),
+		FailClosed:          getBool("FAIL_CLOSED", true),
+		RiskThreshold:       getFloat("RISK_THRESHOLD", 0.70),
+		MaxBodyBytes:        maxBody,
+		RateLimitRPS:        getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst:      getInt("RATE_LIMIT_BURST", 20),
 	}
 }
 

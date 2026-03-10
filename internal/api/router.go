@@ -76,15 +76,16 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		return
 	}
 	setAuditMessageType(w, req.MessageType)
+	if req.MessageType == string(safety.MessageTypeToolCall) {
+		setAuditToolCallDetails(w, req.Message)
+	}
 	// Message-type policy notes:
 	// - user: run the full safety engine (classifier + policy rules).
 	// - system: currently pass-through as safe=true, to be expanded later.
 	//   Future checks could include policy leakage markers, unsafe instruction
 	//   generation, sensitive data reflection, and response-policy drift.
-	// - tool_call: currently pass-through as safe=true, to be expanded later.
-	//   Future checks could include strict JSON/schema validation, tool allow/
-	//   deny lists, argument risk scanning, and per-tool semantic validators.
-	if req.MessageType == string(safety.MessageTypeSystem) || req.MessageType == string(safety.MessageTypeToolCall) {
+	// - tool_call: evaluated by tool-call specific rules.
+	if req.MessageType == string(safety.MessageTypeSystem) {
 		writeJSON(w, http.StatusOK, safety.Result{Safe: true, Reasons: []safety.Reason{}, RiskScore: 0})
 		return
 	}
@@ -176,7 +177,11 @@ type statusRecorder struct {
 	responseBody  bytes.Buffer
 	bodyTruncated bool
 	messageType   string
+	toolName      string
+	toolArgs      string
 }
+
+const maxAuditToolArgsLen = 512
 
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
@@ -205,6 +210,12 @@ func (r *statusRecorder) setAuditMessageType(v string) {
 	r.messageType = strings.TrimSpace(v)
 }
 
+func (r *statusRecorder) setAuditToolCallDetails(message string) {
+	name, args := extractToolCallAuditFields(message)
+	r.toolName = name
+	r.toolArgs = args
+}
+
 func requestLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -216,13 +227,23 @@ func requestLoggingMiddleware(next http.Handler) http.Handler {
 		if rec.messageType != "" {
 			messageTypeField = rec.messageType
 		}
-		log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s safe=%s risk_score=%s reason_ids=%s",
+		toolNameField := "na"
+		toolArgsField := "na"
+		if rec.toolName != "" {
+			toolNameField = rec.toolName
+		}
+		if rec.toolArgs != "" {
+			toolArgsField = rec.toolArgs
+		}
+		log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
 			r.Method,
 			r.URL.Path,
 			rec.status,
 			time.Since(start).Milliseconds(),
 			r.RemoteAddr,
 			messageTypeField,
+			toolNameField,
+			toolArgsField,
 			safeField,
 			riskScoreField,
 			reasonIDsField,
@@ -234,10 +255,95 @@ type auditMessageTypeSetter interface {
 	setAuditMessageType(string)
 }
 
+type auditToolCallSetter interface {
+	setAuditToolCallDetails(string)
+}
+
 func setAuditMessageType(w http.ResponseWriter, messageType string) {
 	if setter, ok := w.(auditMessageTypeSetter); ok {
 		setter.setAuditMessageType(messageType)
 	}
+}
+
+func setAuditToolCallDetails(w http.ResponseWriter, message string) {
+	if setter, ok := w.(auditToolCallSetter); ok {
+		setter.setAuditToolCallDetails(message)
+	}
+}
+
+func extractToolCallAuditFields(message string) (string, string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return "unknown", "none"
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(message), &payload); err != nil {
+		return "unparsed", message
+	}
+
+	toolName := firstString(payload, "tool", "tool_name", "name")
+	if toolName == "" {
+		toolName = "unknown"
+	}
+
+	toolArgs := firstRawJSON(payload, "arguments", "args")
+	if toolArgs == "" {
+		toolArgs = "none"
+	}
+	toolArgs = truncateForAudit(toolArgs, maxAuditToolArgsLen)
+
+	return toolName, toolArgs
+}
+
+func truncateForAudit(v string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(v) <= maxLen {
+		return v
+	}
+	const suffix = "...<truncated>"
+	if maxLen <= len(suffix) {
+		return suffix[:maxLen]
+	}
+	return v[:maxLen-len(suffix)] + suffix
+}
+
+func firstString(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		v, ok := payload[key]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func firstRawJSON(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		v, ok := payload[key]
+		if !ok {
+			continue
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		s := strings.TrimSpace(string(b))
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func auditFieldsFromResponse(path string, status int, body []byte) (string, string, string) {

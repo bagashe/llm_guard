@@ -54,6 +54,13 @@ func main() {
 
 	engine := safety.NewEngine(cfg.FailClosed, cfg.RiskThreshold)
 	engine.Register(rules.NewCountryBlacklistRule(cfg.CountryBlacklist, cfg.FailClosed))
+	log.Println("geo rules registered: country_blacklist.blocked_country,country_blacklist.unknown_country")
+	domainBlacklist, err := config.LoadDomainBlacklist(cfg.DomainBlacklistPath)
+	if err != nil {
+		log.Fatalf("load domain blacklist path=%s: %v", cfg.DomainBlacklistPath, err)
+	}
+	engine.Register(rules.NewToolCallDomainBlacklistRule(domainBlacklist))
+	log.Printf("tool-call rules registered: tool_call.domain_blacklist path=%s domains=%d", cfg.DomainBlacklistPath, len(domainBlacklist))
 	if cfg.ClassifierPath == "" {
 		log.Fatal("classifier path is required")
 	}
@@ -61,13 +68,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("load classifier path=%s: %v", cfg.ClassifierPath, err)
 	}
-	engine.Register(rules.NewClassifierRule(clf))
 	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
+	engine.Register(rules.NewClassifierRule(clf))
+	log.Println("input rules registered: classifier.malicious_intent,input.pii_detection")
 	engine.Register(rules.NewPIIDetectionRule())
-	log.Println("input scanning rule registered: pii_detection")
 	engine.Register(rules.NewSystemPromptLeakRule())
 	engine.Register(rules.NewSecretLeakRule())
-	log.Println("output scanning rules registered: system_prompt_leak, secret_leak")
+	log.Println("output rules registered: output.system_prompt_leak,output.secret_leak")
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	defer limiter.Stop()

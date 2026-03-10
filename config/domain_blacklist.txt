@@ -1,0 +1,4 @@
+# Domain blacklist for tool-call URL restrictions.
+# Format: one domain per line. Lines starting with '#' are comments.
+koobface.com
+moltbook.com

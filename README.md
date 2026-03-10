@@ -8,6 +8,7 @@ Go service for evaluating LLM input and output with API key auth, per-key rate l
 - `POST /v1/evaluate` requires `message_type` (`user`, `system`, `tool_call`, `assistant`) and returns `safe`, `reasons`, and `risk_score`
 - Fail-closed policy support (`FAIL_CLOSED=true`)
 - Extensible rule engine with classifier-based malicious-intent detection
+- Input scanning: PII detection on user messages (email, SSN with invalid-range filtering, credit card with Luhn check, phone with NANP validation)
 - Output scanning: leaked system prompt detection and secret/credential detection (regex + Shannon entropy)
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 - Country blacklist short-circuits evaluation before classifier scoring
@@ -160,7 +161,7 @@ curl -X POST http://localhost:8080/v1/evaluate \
 
 `message_type` behavior:
 
-- `user`: full input safety evaluation (classifier, country blacklist).
+- `user`: full input safety evaluation (country blacklist, classifier, PII detection).
 - `assistant`: output scanning (system prompt leak detection, secret/credential detection).
 - `system`: currently pass-through (`safe=true`) while system-output checks are being added.
 - `tool_call`: currently pass-through (`safe=true`) while tool invocation checks are being added.
@@ -225,12 +226,13 @@ BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
 |------|-------------|-------------|
 | `country_blacklist.blocked_country` | all | Blocks requests from blacklisted countries (short-circuits) |
 | `classifier.malicious_intent` | `user` | ML classifier for prompt injection, exfiltration, host takeover |
+| `input.pii_detection` | `user` | Detects likely PII in user input (flag-only): email, SSN (invalid-range filtered), credit card (Luhn-validated), phone (NANP) |
 | `output.system_prompt_leak` | `assistant` | Regex detection of leaked system prompts / internal instructions |
 | `output.secret_leak` | `assistant` | Regex + entropy detection of credentials, API keys, private keys |
 
 Examples of future rules:
 
-- PII detection/redaction on input
+- PII redaction/anonymization on input
 - Embedding-based jailbreak similarity
 - Multi-turn context tracking
 - Tool invocation allowlists/denylists

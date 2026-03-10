@@ -95,6 +95,36 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("returns safe true but flags pii in user input", func(t *testing.T) {
+		h := newTestRouter(t, testRouterOptions{})
+		body := map[string]any{
+			"message":      "You can reach me at jane.doe@example.com for updates.",
+			"message_type": "user",
+			"context": map[string]any{
+				"client_signals": map[string]any{"ip": "8.8.8.8"},
+			},
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !res.Safe {
+			t.Fatalf("expected safe=true for flag-only pii detection, got reasons=%v", res.Reasons)
+		}
+		if res.RiskScore != 0.25 {
+			t.Fatalf("unexpected risk_score: got %f want %f", res.RiskScore, 0.25)
+		}
+		if len(res.Reasons) == 0 || res.Reasons[0].RuleID != "input.pii_detection" {
+			t.Fatalf("unexpected reasons: %+v", res.Reasons)
+		}
+	})
+
 	t.Run("returns safe false when geoip lookup fails in fail-closed mode", func(t *testing.T) {
 		h := newTestRouter(t, testRouterOptions{geoErr: errors.New("geo db unavailable")})
 		body := map[string]any{
@@ -317,6 +347,7 @@ func newTestRouter(t *testing.T, opts testRouterOptions) http.Handler {
 	}
 	engine.Register(rules.NewCountryBlacklistRule(blacklist, true))
 	engine.Register(rules.NewClassifierRule(testClassifierModel()))
+	engine.Register(rules.NewPIIDetectionRule())
 	engine.Register(rules.NewSystemPromptLeakRule())
 	engine.Register(rules.NewSecretLeakRule())
 

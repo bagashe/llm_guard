@@ -10,7 +10,8 @@ Planned features and safeguards for evolving llm_guard into a full proxy between
 
 ## Input hardening
 
-- [ ] PII detection/redaction before forwarding to the LLM (emails, SSNs, credit cards)
+- [x] PII detection on input (emails, SSNs, credit cards, phone numbers)
+- [ ] PII redaction/anonymization before forwarding to the LLM
 - [ ] Embedding-based similarity to known jailbreak corpora for novel attack detection
 - [ ] Multi-turn context tracking to catch slow jailbreaks that build up across turns
 

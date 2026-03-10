@@ -59,4 +59,17 @@ func TestCountryBlacklistRule(t *testing.T) {
 			t.Fatal("did not expect match for empty blacklist")
 		}
 	})
+
+	t.Run("localhost bypasses country blacklist and unknown country", func(t *testing.T) {
+		rule := NewCountryBlacklistRule(blocked, true)
+		for _, input := range []safety.Input{{ClientIP: "127.0.0.1", CountryCode: "KP"}, {ClientIP: "::1"}} {
+			match, err := rule.Evaluate(context.Background(), input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if match.Matched {
+				t.Fatalf("did not expect match for localhost input: %+v", input)
+			}
+		}
+	})
 }

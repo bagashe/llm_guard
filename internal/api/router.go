@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +75,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message_type must be one of: user, system, tool_call, assistant"})
 		return
 	}
+	setAuditMessageType(w, req.MessageType)
 	// Message-type policy notes:
 	// - user: run the full safety engine (classifier + policy rules).
 	// - system: currently pass-through as safe=true, to be expanded later.
@@ -86,13 +89,16 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 		return
 	}
 
+	sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
+	isLocalhost := safety.IsLoopbackIP(sourceIP)
+
 	ipStr := strings.TrimSpace(req.Context.ClientSignals.IP)
 	if ipStr == "" {
-		ipStr = extractClientIP(r, dep.Config.TrustProxyHeaders)
+		ipStr = sourceIP
 	}
 
-	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: ipStr}
-	if ipStr != "" {
+	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP}
+	if ipStr != "" && !isLocalhost {
 		if ip := net.ParseIP(ipStr); ip != nil {
 			code, err := dep.CountryResolver.CountryCode(ip)
 			if err != nil {
@@ -166,7 +172,10 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status        int
+	responseBody  bytes.Buffer
+	bodyTruncated bool
+	messageType   string
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
@@ -174,17 +183,87 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	const maxCaptureBytes = 4096
+	if !r.bodyTruncated {
+		remaining := maxCaptureBytes - r.responseBody.Len()
+		if remaining > 0 {
+			if len(p) <= remaining {
+				_, _ = r.responseBody.Write(p)
+			} else {
+				_, _ = r.responseBody.Write(p[:remaining])
+				r.bodyTruncated = true
+			}
+		} else {
+			r.bodyTruncated = true
+		}
+	}
+	return r.ResponseWriter.Write(p)
+}
+
+func (r *statusRecorder) setAuditMessageType(v string) {
+	r.messageType = strings.TrimSpace(v)
+}
+
 func requestLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s",
+
+		safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
+		messageTypeField := "na"
+		if rec.messageType != "" {
+			messageTypeField = rec.messageType
+		}
+		log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s safe=%s risk_score=%s reason_ids=%s",
 			r.Method,
 			r.URL.Path,
 			rec.status,
 			time.Since(start).Milliseconds(),
 			r.RemoteAddr,
+			messageTypeField,
+			safeField,
+			riskScoreField,
+			reasonIDsField,
 		)
 	})
+}
+
+type auditMessageTypeSetter interface {
+	setAuditMessageType(string)
+}
+
+func setAuditMessageType(w http.ResponseWriter, messageType string) {
+	if setter, ok := w.(auditMessageTypeSetter); ok {
+		setter.setAuditMessageType(messageType)
+	}
+}
+
+func auditFieldsFromResponse(path string, status int, body []byte) (string, string, string) {
+	if path != "/v1/evaluate" || status != http.StatusOK || len(body) == 0 {
+		return "na", "na", "na"
+	}
+
+	var result safety.Result
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "parse_error", "parse_error", "parse_error"
+	}
+
+	reasonIDs := make([]string, 0, len(result.Reasons))
+	for _, reason := range result.Reasons {
+		reasonID := strings.TrimSpace(reason.RuleID)
+		if reasonID != "" {
+			reasonIDs = append(reasonIDs, reasonID)
+		}
+	}
+	if len(reasonIDs) == 0 {
+		reasonIDs = []string{"none"}
+	}
+
+	return strconv.FormatBool(result.Safe), floatToAuditString(result.RiskScore), strings.Join(reasonIDs, ",")
+}
+
+func floatToAuditString(v float64) string {
+	return strconv.FormatFloat(v, 'f', 4, 64)
 }

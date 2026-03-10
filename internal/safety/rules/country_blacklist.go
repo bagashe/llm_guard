@@ -24,6 +24,10 @@ func (r CountryBlacklistRule) Evaluate(_ context.Context, in safety.Input) (safe
 		return safety.Match{}, nil
 	}
 
+	if safety.IsLoopbackIP(in.ClientIP) {
+		return safety.Match{}, nil
+	}
+
 	if in.CountryCode == "" {
 		if r.failOnUnknown {
 			return safety.Match{

@@ -60,7 +60,9 @@ func main() {
 		log.Fatalf("load domain blacklist path=%s: %v", cfg.DomainBlacklistPath, err)
 	}
 	engine.Register(rules.NewToolCallDomainBlacklistRule(domainBlacklist))
-	log.Printf("tool-call rules registered: tool_call.domain_blacklist path=%s domains=%d", cfg.DomainBlacklistPath, len(domainBlacklist))
+	engine.Register(rules.NewToolCallCommandPolicyRule())
+	engine.Register(rules.NewToolCallSQLPolicyRule())
+	log.Printf("tool-call rules registered: tool_call.domain_blacklist,tool_call.command_policy,tool_call.sql_policy domains=%d", len(domainBlacklist))
 	if cfg.ClassifierPath == "" {
 		log.Fatal("classifier path is required")
 	}

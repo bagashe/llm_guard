@@ -2,7 +2,6 @@ package rules
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -44,7 +43,7 @@ func (r ToolCallDomainBlacklistRule) Evaluate(_ context.Context, in safety.Input
 		return safety.Match{}, nil
 	}
 
-	domains := extractDomainsFromToolCallPayload(in.Message, r.domainFinder, r.minDomainPrefix)
+	domains := r.extractDomains(in.Message)
 	if len(domains) == 0 {
 		return safety.Match{}, nil
 	}
@@ -73,35 +72,17 @@ func (r ToolCallDomainBlacklistRule) Evaluate(_ context.Context, in safety.Input
 	}, nil
 }
 
-func extractDomainsFromToolCallPayload(message string, finder *regexp.Regexp, minPrefix int) []string {
-	message = strings.TrimSpace(message)
-	if message == "" {
+func (r ToolCallDomainBlacklistRule) extractDomains(message string) []string {
+	values := collectStringsFromPayload(message)
+	if len(values) == 0 {
 		return nil
 	}
 
-	var payload any
-	if err := json.Unmarshal([]byte(message), &payload); err == nil {
-		collector := make([]string, 0)
-		collectDomainsFromAny(payload, finder, minPrefix, &collector)
-		return normalizeDomainList(collector)
+	var raw []string
+	for _, s := range values {
+		raw = append(raw, extractDomainsFromString(s, r.domainFinder, r.minDomainPrefix)...)
 	}
-
-	return normalizeDomainList(extractDomainsFromString(message, finder, minPrefix))
-}
-
-func collectDomainsFromAny(v any, finder *regexp.Regexp, minPrefix int, out *[]string) {
-	switch typed := v.(type) {
-	case map[string]any:
-		for _, child := range typed {
-			collectDomainsFromAny(child, finder, minPrefix, out)
-		}
-	case []any:
-		for _, child := range typed {
-			collectDomainsFromAny(child, finder, minPrefix, out)
-		}
-	case string:
-		*out = append(*out, extractDomainsFromString(typed, finder, minPrefix)...)
-	}
+	return normalizeDomainList(raw)
 }
 
 func extractDomainsFromString(s string, finder *regexp.Regexp, minPrefix int) []string {

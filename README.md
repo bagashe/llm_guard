@@ -10,7 +10,7 @@ Go service for evaluating LLM input and output with API key auth, per-key rate l
 - Extensible rule engine with classifier-based malicious-intent detection
 - Input scanning: PII detection on user messages (email, SSN with invalid-range filtering, credit card with Luhn check, phone with NANP validation)
 - Output scanning: leaked system prompt detection and secret/credential detection (regex + Shannon entropy)
-- Tool-call scanning: blocks tool calls that reference blacklisted domains
+- Tool-call scanning: domain blacklist, dangerous command detection, dangerous SQL detection
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 - Country blacklist short-circuits evaluation before classifier scoring
 - Per-key rate limiting (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
@@ -171,7 +171,7 @@ curl -X POST http://localhost:8080/v1/evaluate \
 - `user`: full input safety evaluation (country blacklist, classifier, PII detection).
 - `assistant`: output scanning (system prompt leak detection, secret/credential detection).
 - `system`: currently pass-through (`safe=true`) while system-output checks are being added.
-- `tool_call`: tool-call safety evaluation (domain blacklist checks).
+- `tool_call`: tool-call safety evaluation (domain blacklist, command policy, SQL policy).
 
 ```json
 {
@@ -233,6 +233,8 @@ BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
 |------|-------------|-------------|
 | `country_blacklist.blocked_country` | all | Blocks requests from blacklisted countries (short-circuits) |
 | `tool_call.domain_blacklist` | `tool_call` | Blocks tool calls that reference blacklisted domains |
+| `tool_call.command_policy` | `tool_call` | Blocks dangerous shell commands (rm -rf, sudo, curl\|sh, path traversal, etc.) |
+| `tool_call.sql_policy` | `tool_call` | Blocks dangerous SQL (DROP, TRUNCATE, UNION SELECT, injection patterns, etc.) |
 | `classifier.malicious_intent` | `user` | ML classifier for prompt injection, exfiltration, host takeover |
 | `input.pii_detection` | `user` | Detects likely PII in user input (flag-only): email, SSN (invalid-range filtered), credit card (Luhn-validated), phone (NANP) |
 | `output.system_prompt_leak` | `assistant` | Regex detection of leaked system prompts / internal instructions |

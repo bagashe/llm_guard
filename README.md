@@ -10,7 +10,7 @@ Go service for evaluating LLM input and output with API key auth, per-key rate l
 - Extensible rule engine with classifier-based malicious-intent detection
 - Input scanning: PII detection on user messages (email, SSN with invalid-range filtering, credit card with Luhn check, phone with NANP validation)
 - Output scanning: leaked system prompt detection and secret/credential detection (regex + Shannon entropy)
-- Tool-call scanning: domain blacklist, dangerous command detection, dangerous SQL detection
+- Tool-call scanning: domain blacklist, internal-network access controls, redirect resolution, dangerous command detection, dangerous SQL detection
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 - Country blacklist short-circuits evaluation before classifier scoring
 - Per-key rate limiting (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
@@ -112,6 +112,7 @@ export DATABASE_PATH=./storage/llm_guard.db
 export INITIAL_API_KEYS=dev-key-1
 export COUNTRY_BLACKLIST=KP,IR
 export DOMAIN_BLACKLIST_PATH=./config/domain_blacklist.txt
+export INTERNAL_DESTINATION_ALLOWLIST_PATH=./config/internal_destination_allowlist.txt
 export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
 export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
@@ -124,12 +125,24 @@ export RATE_LIMIT_BURST=20
 
 `DOMAIN_BLACKLIST_PATH` is required. Server startup fails if the file cannot be read or contains invalid domains.
 
+`INTERNAL_DESTINATION_ALLOWLIST_PATH` is required. Server startup fails if the file cannot be read or contains invalid entries.
+
 Domain blacklist file format:
 
 ```text
 # one domain per line (no commas)
 evil.com
 malware.test
+```
+
+Internal destination allowlist file format:
+
+```text
+# one entry per line (host/domain suffix, IP, or CIDR)
+localhost
+api.internal.local
+127.0.0.1
+10.0.0.0/8
 ```
 
 2. Run the service:
@@ -171,7 +184,7 @@ curl -X POST http://localhost:8080/v1/evaluate \
 - `user`: full input safety evaluation (country blacklist, classifier, PII detection).
 - `assistant`: output scanning (system prompt leak detection, secret/credential detection).
 - `system`: currently pass-through (`safe=true`) while system-output checks are being added.
-- `tool_call`: tool-call safety evaluation (domain blacklist, command policy, SQL policy).
+- `tool_call`: tool-call safety evaluation (domain blacklist, internal-network access controls, redirect resolution, command policy, SQL policy).
 
 ```json
 {
@@ -233,6 +246,8 @@ BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
 |------|-------------|-------------|
 | `country_blacklist.blocked_country` | all | Blocks requests from blacklisted countries (short-circuits) |
 | `tool_call.domain_blacklist` | `tool_call` | Blocks tool calls that reference blacklisted domains |
+| `tool_call.internal_network_access` | `tool_call` | Blocks tool calls targeting internal/local destinations unless allowlisted |
+| `tool_call.redirect_resolution` | `tool_call` | Follows redirects and blocks chains that hit internal/local or blacklisted destinations (fail-closed on check errors) |
 | `tool_call.command_policy` | `tool_call` | Blocks dangerous shell commands (rm -rf, sudo, curl\|sh, path traversal, etc.) |
 | `tool_call.sql_policy` | `tool_call` | Blocks dangerous SQL (DROP, TRUNCATE, UNION SELECT, injection patterns, etc.) |
 | `classifier.malicious_intent` | `user` | ML classifier for prompt injection, exfiltration, host takeover |

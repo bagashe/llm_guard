@@ -1,0 +1,5 @@
+# Internal destination allowlist for tool-call network checks.
+# Supports one entry per line:
+# - Domain/host (suffix match): api.internal.local
+# - IP: 127.0.0.1
+# - CIDR: 10.0.0.0/8

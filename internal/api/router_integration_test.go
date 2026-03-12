@@ -395,13 +395,93 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 			t.Fatalf("unexpected reasons: %+v", res.Reasons)
 		}
 	})
+
+	t.Run("returns safe false for tool_call to internal host", func(t *testing.T) {
+		h := newTestRouter(t, testRouterOptions{})
+		body := map[string]any{
+			"message":      `{"tool":"browser.open","arguments":{"url":"http://127.0.0.1:8080/healthz"}}`,
+			"message_type": "tool_call",
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if res.Safe {
+			t.Fatalf("expected safe=false for internal destination, got: %+v", res)
+		}
+		if len(res.Reasons) == 0 || res.Reasons[0].RuleID != "tool_call.internal_network_access" {
+			t.Fatalf("unexpected reasons: %+v", res.Reasons)
+		}
+	})
+
+	t.Run("returns safe true for allowlisted internal host", func(t *testing.T) {
+		h := newTestRouter(t, testRouterOptions{internalAllowlistIPs: map[string]struct{}{"127.0.0.1": {}}})
+		body := map[string]any{
+			"message":      `{"tool":"browser.open","arguments":{"url":"http://127.0.0.1:8080/healthz"}}`,
+			"message_type": "tool_call",
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !res.Safe {
+			t.Fatalf("expected safe=true for allowlisted internal host, got: %+v", res)
+		}
+	})
+
+	t.Run("returns safe false when redirect targets blacklisted domain", func(t *testing.T) {
+		redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://login.evil.com/path", http.StatusFound)
+		}))
+		defer redirectSrv.Close()
+
+		h := newTestRouter(t, testRouterOptions{
+			domainBlacklist:      map[string]struct{}{"evil.com": {}},
+			internalAllowlistIPs: map[string]struct{}{"127.0.0.1": {}},
+		})
+		body := map[string]any{
+			"message":      `{"tool":"browser.open","arguments":{"url":"` + redirectSrv.URL + `"}}`,
+			"message_type": "tool_call",
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if res.Safe {
+			t.Fatalf("expected safe=false for redirect to blacklisted domain, got: %+v", res)
+		}
+		if len(res.Reasons) == 0 || res.Reasons[0].RuleID != "tool_call.redirect_resolution" {
+			t.Fatalf("unexpected reasons: %+v", res.Reasons)
+		}
+	})
 }
 
 type testRouterOptions struct {
-	countryBlacklist map[string]struct{}
-	domainBlacklist  map[string]struct{}
-	geoCode          string
-	geoErr           error
+	countryBlacklist         map[string]struct{}
+	domainBlacklist          map[string]struct{}
+	internalAllowlistDomains map[string]struct{}
+	internalAllowlistIPs     map[string]struct{}
+	internalAllowlistCIDRs   []*net.IPNet
+	geoCode                  string
+	geoErr                   error
 }
 
 func newTestRouter(t *testing.T, opts testRouterOptions) http.Handler {
@@ -434,6 +514,8 @@ func newTestRouter(t *testing.T, opts testRouterOptions) http.Handler {
 	}
 	engine.Register(rules.NewCountryBlacklistRule(blacklist, true))
 	engine.Register(rules.NewToolCallDomainBlacklistRule(opts.domainBlacklist))
+	engine.Register(rules.NewToolCallInternalNetworkAccessRule(opts.internalAllowlistDomains, opts.internalAllowlistIPs, opts.internalAllowlistCIDRs))
+	engine.Register(rules.NewToolCallRedirectResolutionRule(opts.domainBlacklist, opts.internalAllowlistDomains, opts.internalAllowlistIPs, opts.internalAllowlistCIDRs))
 	engine.Register(rules.NewToolCallCommandPolicyRule())
 	engine.Register(rules.NewToolCallSQLPolicyRule())
 	engine.Register(rules.NewClassifierRule(testClassifierModel()))

@@ -59,10 +59,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("load domain blacklist path=%s: %v", cfg.DomainBlacklistPath, err)
 	}
+	internalAllowlist, err := config.LoadInternalDestinationAllowlist(cfg.InternalAllowlistPath)
+	if err != nil {
+		log.Fatalf("load internal destination allowlist path=%s: %v", cfg.InternalAllowlistPath, err)
+	}
 	engine.Register(rules.NewToolCallDomainBlacklistRule(domainBlacklist))
+	engine.Register(rules.NewToolCallInternalNetworkAccessRule(internalAllowlist.Domains, internalAllowlist.IPs, internalAllowlist.CIDRs))
+	engine.Register(rules.NewToolCallRedirectResolutionRule(domainBlacklist, internalAllowlist.Domains, internalAllowlist.IPs, internalAllowlist.CIDRs))
 	engine.Register(rules.NewToolCallCommandPolicyRule())
 	engine.Register(rules.NewToolCallSQLPolicyRule())
-	log.Printf("tool-call rules registered: tool_call.domain_blacklist,tool_call.command_policy,tool_call.sql_policy domains=%d", len(domainBlacklist))
+	log.Printf("tool-call rules registered: tool_call.domain_blacklist,tool_call.internal_network_access,tool_call.redirect_resolution,tool_call.command_policy,tool_call.sql_policy domains=%d internal_allowlist_domains=%d internal_allowlist_ips=%d internal_allowlist_cidrs=%d", len(domainBlacklist), len(internalAllowlist.Domains), len(internalAllowlist.IPs), len(internalAllowlist.CIDRs))
 	if cfg.ClassifierPath == "" {
 		log.Fatal("classifier path is required")
 	}

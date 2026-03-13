@@ -188,6 +188,9 @@ func resolvesToInternalOrLocal(ctx context.Context, host string, timeout time.Du
 		return false, err
 	}
 	for _, addr := range addrs {
+		if addr.IP.IsUnspecified() {
+			continue // DNS sinkhole (0.0.0.0 / ::), not a real internal target
+		}
 		if safety.IsPrivateOrLocalIP(addr.IP.String()) {
 			return true, nil
 		}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"llm_guard/internal/safety"
 )
 
 func LoadDomainBlacklist(path string) (map[string]struct{}, error) {
@@ -28,10 +30,11 @@ func LoadDomainBlacklist(path string) (map[string]struct{}, error) {
 		if line == "" {
 			continue
 		}
-		if !isPlausibleDomain(line) {
-			return nil, fmt.Errorf("invalid domain in blacklist at line %d: %q", lineNo, line)
+		normalized := safety.NormalizeHost(line)
+		if normalized == "" {
+			return nil, fmt.Errorf("invalid host in blacklist at line %d: %q", lineNo, line)
 		}
-		blocked[line] = struct{}{}
+		blocked[normalized] = struct{}{}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read domain blacklist file: %w", err)

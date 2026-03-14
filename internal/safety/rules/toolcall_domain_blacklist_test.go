@@ -10,8 +10,10 @@ import (
 
 func TestToolCallDomainBlacklistRule(t *testing.T) {
 	rule := NewToolCallDomainBlacklistRule(map[string]struct{}{
-		"evil.com":     {},
-		"malware.test": {},
+		"evil.com":       {},
+		"malware.test":   {},
+		"12.12.12.12":    {},
+		"2001:db8::dead": {},
 	})
 
 	tests := []struct {
@@ -47,6 +49,20 @@ func TestToolCallDomainBlacklistRule(t *testing.T) {
 			messageType: safety.MessageTypeToolCall,
 			message:     `{"tool":"browser.open","arguments":{"url":"https://example.com"}}`,
 			wantMatch:   false,
+		},
+		{
+			name:        "blocks blacklisted ipv4 host",
+			messageType: safety.MessageTypeToolCall,
+			message:     `{"tool":"browser.open","arguments":{"url":"http://12.12.12.12/login"}}`,
+			wantMatch:   true,
+			wantDetail:  []string{"12.12.12.12"},
+		},
+		{
+			name:        "blocks blacklisted ipv6 host",
+			messageType: safety.MessageTypeToolCall,
+			message:     `{"tool":"browser.open","arguments":{"url":"http://[2001:db8::dead]/x"}}`,
+			wantMatch:   true,
+			wantDetail:  []string{"2001:db8::dead"},
 		},
 		{
 			name:        "skips non-toolcall messages",
@@ -91,6 +107,12 @@ func TestNormalizeDomain(t *testing.T) {
 		t.Fatalf("unexpected normalized domain: %s", got)
 	}
 	if got := normalizeDomain("127.0.0.1"); got != "" {
-		t.Fatalf("expected ip to be ignored, got %q", got)
+		t.Fatalf("expected ip to be rejected by normalizeDomain, got %q", got)
+	}
+	if got := safety.NormalizeHost("127.0.0.1"); got != "127.0.0.1" {
+		t.Fatalf("expected normalized ipv4, got %q", got)
+	}
+	if got := safety.NormalizeHost("[2001:0db8::1]"); got != "2001:db8::1" {
+		t.Fatalf("expected normalized ipv6, got %q", got)
 	}
 }

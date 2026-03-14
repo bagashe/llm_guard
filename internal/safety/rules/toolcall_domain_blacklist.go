@@ -20,15 +20,15 @@ type ToolCallDomainBlacklistRule struct {
 
 func NewToolCallDomainBlacklistRule(blocked map[string]struct{}) safety.Rule {
 	normalized := make(map[string]struct{}, len(blocked))
-	for domain := range blocked {
-		d := normalizeDomain(domain)
-		if d != "" {
-			normalized[d] = struct{}{}
+	for host := range blocked {
+		h := safety.NormalizeHost(host)
+		if h != "" {
+			normalized[h] = struct{}{}
 		}
 	}
 
 	return ToolCallDomainBlacklistRule{
-		blocked:      normalized,
+		blocked:         normalized,
 		domainFinder:    regexp.MustCompile(`(?i)\b([a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?)+)\b`),
 		minDomainPrefix: 5,
 	}
@@ -49,9 +49,9 @@ func (r ToolCallDomainBlacklistRule) Evaluate(_ context.Context, in safety.Input
 	}
 
 	matched := make([]string, 0, 1)
-	for _, d := range domains {
-		if isBlockedDomain(d, r.blocked) {
-			matched = append(matched, d)
+	for _, host := range domains {
+		if isBlockedHost(host, r.blocked) {
+			matched = append(matched, host)
 		}
 	}
 	if len(matched) == 0 {
@@ -67,7 +67,7 @@ func (r ToolCallDomainBlacklistRule) Evaluate(_ context.Context, in safety.Input
 		Reason: safety.Reason{
 			RuleID:   r.ID(),
 			Severity: "high",
-			Detail:   fmt.Sprintf("tool call references blacklisted domain(s): %s", strings.Join(matched, ",")),
+			Detail:   fmt.Sprintf("tool call references blacklisted host(s): %s", strings.Join(matched, ",")),
 		},
 	}, nil
 }
@@ -93,7 +93,7 @@ func extractDomainsFromString(s string, finder *regexp.Regexp, minPrefix int) []
 
 	results := make([]string, 0)
 	if u, err := url.Parse(s); err == nil {
-		if host := normalizeDomain(u.Hostname()); host != "" {
+		if host := safety.NormalizeHost(u.Hostname()); host != "" {
 			results = append(results, host)
 		}
 	}
@@ -126,7 +126,7 @@ func domainPrefixLen(d string) int {
 func normalizeDomainList(domains []string) []string {
 	normalized := make([]string, 0, len(domains))
 	for _, d := range domains {
-		if n := normalizeDomain(d); n != "" {
+		if n := safety.NormalizeHost(d); n != "" {
 			normalized = append(normalized, n)
 		}
 	}
@@ -163,9 +163,18 @@ func normalizeDomain(v string) string {
 	return v
 }
 
-func isBlockedDomain(candidate string, blocked map[string]struct{}) bool {
+func isBlockedHost(candidate string, blocked map[string]struct{}) bool {
+	candidate = safety.NormalizeHost(candidate)
+	if candidate == "" {
+		return false
+	}
+	if ip := net.ParseIP(candidate); ip != nil {
+		_, ok := blocked[ip.String()]
+		return ok
+	}
+
 	// Walk up parent domains: "a.b.evil.com" checks "a.b.evil.com", "b.evil.com", "evil.com"
-	for d := candidate; d != ""; {
+	for d := normalizeDomain(candidate); d != ""; {
 		if _, ok := blocked[d]; ok {
 			return true
 		}

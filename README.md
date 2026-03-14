@@ -127,12 +127,14 @@ export RATE_LIMIT_BURST=20
 
 `INTERNAL_DESTINATION_ALLOWLIST_PATH` is required. Server startup fails if the file cannot be read or contains invalid entries.
 
-Domain blacklist file format:
+Domain blacklist file format (domains and IPs):
 
 ```text
 # one domain per line (no commas)
 evil.com
 malware.test
+12.12.12.12
+2001:db8::1
 ```
 
 Internal destination allowlist file format:
@@ -245,7 +247,7 @@ BASE_URL=http://localhost:8080 API_KEY=your-key make smoke
 | Rule | Message type | Description |
 |------|-------------|-------------|
 | `country_blacklist.blocked_country` | all | Blocks requests from blacklisted countries (short-circuits) |
-| `tool_call.domain_blacklist` | `tool_call` | Blocks tool calls that reference blacklisted domains |
+| `tool_call.domain_blacklist` | `tool_call` | Blocks tool calls that reference blacklisted hosts (domains or IPs) |
 | `tool_call.internal_network_access` | `tool_call` | Blocks tool calls targeting internal/local destinations unless allowlisted |
 | `tool_call.redirect_resolution` | `tool_call` | Follows redirects and blocks chains that hit internal/local or blacklisted destinations (fail-closed on check errors) |
 | `tool_call.command_policy` | `tool_call` | Blocks dangerous shell commands (rm -rf, sudo, curl\|sh, path traversal, etc.) |

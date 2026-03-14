@@ -25,8 +25,8 @@ type ToolCallRedirectResolutionRule struct {
 
 func NewToolCallRedirectResolutionRule(blockedDomains map[string]struct{}, allowedDomains map[string]struct{}, allowedIPs map[string]struct{}, allowedCIDRs []*net.IPNet) safety.Rule {
 	blocked := make(map[string]struct{}, len(blockedDomains))
-	for d := range blockedDomains {
-		if normalized := normalizeDomain(d); normalized != "" {
+	for host := range blockedDomains {
+		if normalized := safety.NormalizeHost(host); normalized != "" {
 			blocked[normalized] = struct{}{}
 		}
 	}
@@ -102,10 +102,8 @@ func (r ToolCallRedirectResolutionRule) validateURLWithRedirects(ctx context.Con
 
 		allowlisted := isAllowlistedHost(host, r.allowedDomains, r.allowedIPs, r.allowedCIDRs)
 
-		if ip := net.ParseIP(host); ip == nil {
-			if isBlockedDomain(normalizeDomain(host), r.blockedDomains) {
-				return true, fmt.Sprintf("redirect hop %d targets blacklisted domain: %s", hop, host), nil
-			}
+		if isBlockedHost(host, r.blockedDomains) {
+			return true, fmt.Sprintf("redirect hop %d targets blacklisted host: %s", hop, host), nil
 		}
 
 		if !allowlisted && isInternalOrLocalHost(host) {

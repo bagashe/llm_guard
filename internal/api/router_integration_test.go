@@ -348,6 +348,30 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("returns safe false for tool_call to blacklisted ip", func(t *testing.T) {
+		h := newTestRouter(t, testRouterOptions{domainBlacklist: map[string]struct{}{"12.12.12.12": {}}})
+		body := map[string]any{
+			"message":      `{"tool":"browser.open","arguments":{"url":"http://12.12.12.12/login"}}`,
+			"message_type": "tool_call",
+		}
+		rr := callEvaluate(t, h, body, "test-key")
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		}
+
+		var res safety.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if res.Safe {
+			t.Fatalf("expected safe=false for blacklisted tool_call ip, got: %+v", res)
+		}
+		if len(res.Reasons) == 0 || res.Reasons[0].RuleID != "tool_call.domain_blacklist" {
+			t.Fatalf("unexpected reasons: %+v", res.Reasons)
+		}
+	})
+
 	t.Run("returns safe false for tool_call with dangerous command", func(t *testing.T) {
 		h := newTestRouter(t, testRouterOptions{})
 		body := map[string]any{

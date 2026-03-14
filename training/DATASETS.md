@@ -2,6 +2,12 @@
 
 Default training uses a **clean-license** profile only.
 
+Allowed licenses in this profile:
+
+- Apache-2.0
+- MIT
+- CC-BY-4.0 (attribution required)
+
 ## Allowed (default)
 
 | Dataset | Source | License | Status | Notes |
@@ -9,6 +15,10 @@ Default training uses a **clean-license** profile only.
 | deepset/prompt-injections | https://huggingface.co/datasets/deepset/prompt-injections | Apache-2.0 | allowed | Binary prompt injection labels. |
 | JailbreakBench/JBB-Behaviors | https://huggingface.co/datasets/JailbreakBench/JBB-Behaviors | MIT | allowed | Harmful behavior prompts for jailbreak/misuse intent. |
 | OpenAssistant/oasst1 | https://huggingface.co/datasets/OpenAssistant/oasst1 | Apache-2.0 | allowed | High-volume benign prompter messages after filtering. |
+| neuralchemy/Prompt-injection-dataset | https://huggingface.co/datasets/neuralchemy/Prompt-injection-dataset | Apache-2.0 | allowed | Benign + prompt-injection labeled prompts. |
+| Smooth-3/llm-prompt-injection-attacks | https://huggingface.co/datasets/Smooth-3/llm-prompt-injection-attacks | Apache-2.0 | allowed | Multi-label prompt attack intents including exfiltration and jailbreak. |
+| jackhhao/jailbreak-classification | https://huggingface.co/datasets/jackhhao/jailbreak-classification | Apache-2.0 | allowed | Benign vs jailbreak prompts. |
+| nvidia/Aegis-AI-Content-Safety-Dataset-2.0 | https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0 | CC-BY-4.0 | allowed | Safety-labeled prompts; selected unsafe categories mapped to existing labels. |
 | Synthetic benign prompts | In-repo generator (`prepare_dataset.py`) | N/A | allowed | Used to enforce a minimum benign floor when external benign rows are insufficient. |
 
 ## Excluded from default profile
@@ -20,3 +30,11 @@ Default training uses a **clean-license** profile only.
 | allenai/wildjailbreak | https://huggingface.co/datasets/allenai/wildjailbreak | ODC-BY + gated terms | excluded | Additional responsible-use/gating obligations; not default-safe for all deployments. |
 
 If you change dataset selection, re-check license terms before retraining.
+
+## Attribution note for CC-BY-4.0
+
+When using CC-BY-4.0 datasets (for example, Aegis 2.0), keep attribution in:
+
+- Training docs and dataset manifest files.
+- Release notes for exported models.
+- Any downstream distribution package that ships trained artifacts.

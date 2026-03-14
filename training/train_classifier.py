@@ -7,9 +7,9 @@ import argparse
 import json
 import math
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
-import regex
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
@@ -21,15 +21,24 @@ LABELS = [
     "host_takeover_or_jailbreak",
 ]
 
-TOKEN_PATTERN = r"[\p{L}\p{N}_]+"
+TOKENIZER_TYPE = "char_ngram_wb"
 TOKENIZER_LOWERCASE = True
 
-TOKEN_REGEX = regex.compile(TOKEN_PATTERN)
 
-
-def tokenize_text(text: str) -> list[str]:
+def tokenize_text_char_ngram_wb(text: str, min_n: int, max_n: int) -> list[str]:
     value = text.lower() if TOKENIZER_LOWERCASE else text
-    return TOKEN_REGEX.findall(value)
+    words = value.split()
+    out: list[str] = []
+    for word in words:
+        if not word:
+            continue
+        padded = f" {word} "
+        for n in range(min_n, max_n + 1):
+            if len(padded) < n:
+                continue
+            for i in range(len(padded) - n + 1):
+                out.append(padded[i : i + n])
+    return out
 
 
 def read_jsonl(path: Path):
@@ -78,7 +87,14 @@ def main() -> None:
     parser.add_argument("--out", default="models/classifier_v1.json")
     parser.add_argument("--metrics-out", default="training/artifacts/classifier_v1_metrics.json")
     parser.add_argument("--max-features", type=int, default=50000)
+    parser.add_argument("--char-ngram-min", type=int, default=3)
+    parser.add_argument("--char-ngram-max", type=int, default=5)
     args = parser.parse_args()
+
+    if args.char_ngram_min < 1:
+        raise ValueError("--char-ngram-min must be >= 1")
+    if args.char_ngram_max < args.char_ngram_min:
+        raise ValueError("--char-ngram-max must be >= --char-ngram-min")
 
     train_rows = read_jsonl(Path(args.train))
     val_rows = read_jsonl(Path(args.val))
@@ -86,11 +102,11 @@ def main() -> None:
     x_val, y_val = to_xy(val_rows)
 
     vectorizer = CountVectorizer(
-        lowercase=TOKENIZER_LOWERCASE,
+        lowercase=False,
         max_features=args.max_features,
-        tokenizer=tokenize_text,
+        tokenizer=lambda value: tokenize_text_char_ngram_wb(value, args.char_ngram_min, args.char_ngram_max),
         preprocessor=None,
-        token_pattern=None,
+        token_pattern=cast(Any, None),
     )
     x_train_vec = vectorizer.fit_transform(x_train)
     x_val_vec = vectorizer.transform(x_val)
@@ -105,16 +121,24 @@ def main() -> None:
     for i, label in enumerate(LABELS):
         y_pred[:, i] = (y_prob[:, i] >= thresholds[label]).astype(int)
 
-    report_text = classification_report(y_val, y_pred, target_names=LABELS, zero_division=0)
-    report_dict = classification_report(y_val, y_pred, target_names=LABELS, zero_division=0, output_dict=True)
+    zero_division_value: Any = 0
+    report_text = classification_report(y_val, y_pred, target_names=LABELS, zero_division=zero_division_value)
+    report_dict = classification_report(
+        y_val,
+        y_pred,
+        target_names=LABELS,
+        zero_division=zero_division_value,
+        output_dict=True,
+    )
     print(report_text)
 
     vocab = {k: int(v) for k, v in vectorizer.vocabulary_.items()}
     n_features = len(vocab)
     weights = {}
     bias = {}
+    estimators = list(model.estimators_)
     for i, label in enumerate(LABELS):
-        est = model.estimators_[i]
+        est: Any = estimators[i]
         if hasattr(est, "coef_") and hasattr(est, "intercept_"):
             coef = est.coef_[0]
             coef = coef[:n_features]
@@ -131,9 +155,10 @@ def main() -> None:
         "version": "v1",
         "labels": LABELS,
         "tokenizer": {
-            "type": "regex",
-            "pattern": TOKEN_PATTERN,
+            "type": TOKENIZER_TYPE,
             "lowercase": TOKENIZER_LOWERCASE,
+            "ngram_min": args.char_ngram_min,
+            "ngram_max": args.char_ngram_max,
         },
         "vocab": vocab,
         "weights": weights,

@@ -15,7 +15,7 @@ func TestClassifierRule(t *testing.T) {
 	model := &classifier.Model{
 		Labels: []string{"prompt_injection"},
 		Vocab: map[string]int{
-			"ignore": 0,
+			" ign": 0,
 		},
 		Weights: map[string][]float64{
 			"prompt_injection": {2.0},
@@ -42,7 +42,7 @@ func TestClassifierRuleSkipsNonUserMessages(t *testing.T) {
 	model := &classifier.Model{
 		Labels: []string{"prompt_injection"},
 		Vocab: map[string]int{
-			"ignore": 0,
+			" ign": 0,
 		},
 		Weights: map[string][]float64{
 			"prompt_injection": {2.0},

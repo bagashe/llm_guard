@@ -544,8 +544,8 @@ func testClassifierModel() *classifier.Model {
 		Version: "test-v1",
 		Labels:  []string{"prompt_injection"},
 		Vocab: map[string]int{
-			"ignore": 0,
-			"hidden": 1,
+			" ign": 0,
+			"hid":  1,
 		},
 		Weights: map[string][]float64{
 			"prompt_injection": {2.0, 1.8},

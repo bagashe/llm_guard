@@ -14,7 +14,7 @@ python3 -m uv sync --project training
 ```
 
 Default training uses the clean-license dataset profile documented in `training/DATASETS.md`.
-This includes external benign rows (OpenAssistant Apache-2.0) and in-repo synthetic benign fallback rows.
+This profile includes Apache-2.0 / MIT / CC-BY-4.0 datasets and keeps synthetic fallback rows only for minimum label floors.
 
 ## 1) Build unified dataset
 
@@ -23,6 +23,14 @@ This script downloads selected corpora and maps them into a unified multi-label 
 ```bash
 python3 -m uv run --project training python training/prepare_dataset.py --dataset-profile clean --out-dir training/data --oasst-benign-limit 30000 --min-safe-rows 20000
 ```
+
+Optional source caps are available for newly integrated datasets:
+
+- `--neuralchemy-limit`
+- `--smooth3-limit`
+- `--jackhhao-limit`
+- `--aegis-unsafe-limit`
+- `--aegis-safe-limit`
 
 Generated files:
 
@@ -48,7 +56,7 @@ python3 -m uv run --project training python training/train_classifier.py \
 The output model is consumed by the Go service through `CLASSIFIER_PATH`.
 Metrics are saved to `training/artifacts/classifier_v1_metrics.json`.
 
-Tokenizer configuration is exported into the model file and must stay in parity with Go inference. The tokenizer is Unicode-aware (`[\p{L}\p{N}_]+`). Parity fixtures are stored in `training/tokenizer_fixtures.json` and validated by Go tests.
+Tokenizer configuration is exported into the model file and must stay in parity with Go inference. The tokenizer is `char_ngram_wb` with lowercase normalization and default range `3..5`. Parity fixtures are stored in `training/tokenizer_fixtures.json` and validated by Go tests.
 
 ## 3) Run server with model
 

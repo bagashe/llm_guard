@@ -6,21 +6,22 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 )
 
 const (
-	defaultTokenizerType      = "regex"
-	defaultTokenizerPattern   = `[\p{L}\p{N}_]+`
+	defaultTokenizerType      = "char_ngram_wb"
 	defaultTokenizerLowercase = true
+	defaultTokenizerNgramMin  = 3
+	defaultTokenizerNgramMax  = 5
 )
 
 type TokenizerConfig struct {
 	Type      string `json:"type"`
-	Pattern   string `json:"pattern"`
 	Lowercase bool   `json:"lowercase"`
+	NgramMin  int    `json:"ngram_min"`
+	NgramMax  int    `json:"ngram_max"`
 }
 
 type Model struct {
@@ -31,7 +32,6 @@ type Model struct {
 	Weights    map[string][]float64 `json:"weights"`
 	Bias       map[string]float64   `json:"bias"`
 	Thresholds map[string]float64   `json:"thresholds"`
-	tokenRE    *regexp.Regexp
 }
 
 type Prediction struct {
@@ -86,25 +86,26 @@ func (m *Model) initTokenizer() error {
 	if m.Tokenizer.Type == "" {
 		m.Tokenizer.Type = defaultTokenizerType
 	}
-	if m.Tokenizer.Pattern == "" {
-		m.Tokenizer.Pattern = defaultTokenizerPattern
-	}
 	if m.Tokenizer.Type != defaultTokenizerType {
 		return fmt.Errorf("invalid tokenizer type: %s", m.Tokenizer.Type)
 	}
-	re, err := regexp.Compile(m.Tokenizer.Pattern)
-	if err != nil {
-		return fmt.Errorf("invalid tokenizer pattern: %w", err)
+	if m.Tokenizer.NgramMin == 0 {
+		m.Tokenizer.NgramMin = defaultTokenizerNgramMin
 	}
-	m.tokenRE = re
-	if m.Tokenizer.Pattern == defaultTokenizerPattern && !m.Tokenizer.Lowercase {
-		m.Tokenizer.Lowercase = defaultTokenizerLowercase
+	if m.Tokenizer.NgramMax == 0 {
+		m.Tokenizer.NgramMax = defaultTokenizerNgramMax
+	}
+	if m.Tokenizer.NgramMin < 1 {
+		return fmt.Errorf("invalid tokenizer ngram_min: %d", m.Tokenizer.NgramMin)
+	}
+	if m.Tokenizer.NgramMax < m.Tokenizer.NgramMin {
+		return fmt.Errorf("invalid tokenizer ngram range: min=%d max=%d", m.Tokenizer.NgramMin, m.Tokenizer.NgramMax)
 	}
 	return nil
 }
 
 func (m *Model) Predict(text string) []Prediction {
-	if m.tokenRE == nil {
+	if m.Tokenizer.Type == "" {
 		if err := m.initTokenizer(); err != nil {
 			return nil
 		}
@@ -141,11 +142,28 @@ func (m *Model) tokenize(text string) []string {
 	if m.Tokenizer.Lowercase {
 		text = strings.ToLower(text)
 	}
-	parts := m.tokenRE.FindAllString(text, -1)
-	if len(parts) == 0 {
+	words := strings.Fields(text)
+	if len(words) == 0 {
 		return nil
 	}
-	return parts
+
+	out := make([]string, 0)
+	for _, word := range words {
+		runes := []rune(" " + word + " ")
+		for n := m.Tokenizer.NgramMin; n <= m.Tokenizer.NgramMax; n++ {
+			if len(runes) < n {
+				continue
+			}
+			for i := 0; i <= len(runes)-n; i++ {
+				out = append(out, string(runes[i:i+n]))
+			}
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func sigmoid(x float64) float64 {

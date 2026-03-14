@@ -12,7 +12,7 @@ import json
 import random
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 from datasets import load_dataset
 
@@ -26,9 +26,29 @@ MALICIOUS_HINT_REGEX = re.compile(
     r"(ignore\s+previous\s+instructions|reveal\s+.*system\s+prompt|jailbreak|bypass\s+safeguards|reverse\s+shell|privilege\s+escalation|disable\s+endpoint\s+protection|dump\s+credentials|steal\s+data)",
     re.IGNORECASE,
 )
+CYBER_ABUSE_REGEX = re.compile(
+    r"(reverse\s+shell|privilege\s+escalation|ransomware|malware|backdoor|command\s+and\s+control|\bc2\b|payload|exploit|keylogger|sql\s+injection|xss|phishing|steal\s+data|credential\s+stuffing|lateral\s+movement|disable\s+endpoint)",
+    re.IGNORECASE,
+)
+WORDISH_REGEX = re.compile(r"[A-Za-z0-9]")
+
+AEGIS_HOST_CATEGORIES = {
+    "Criminal Planning/Confessions",
+    "Malware",
+    "Illegal Activity",
+    "Guns and Illegal Weapons",
+    "Threat",
+    "Unauthorized Advice",
+    "Fraud/Deception",
+}
+AEGIS_EXFIL_CATEGORIES = {
+    "PII/Privacy",
+}
 
 
-def _safe_text(row: Dict, candidates: List[str]) -> str:
+def _safe_text(row: Mapping[str, Any], candidates: List[str]) -> str:
+    if not isinstance(row, Mapping):
+        return ""
     for key in candidates:
         val = row.get(key)
         if isinstance(val, str) and val.strip():
@@ -36,16 +56,86 @@ def _safe_text(row: Dict, candidates: List[str]) -> str:
     return ""
 
 
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def is_low_quality_text(text: str) -> bool:
+    cleaned = normalize_text(text)
+    if len(cleaned) < 12:
+        return True
+    if len(cleaned) > 6000:
+        return True
+    if not WORDISH_REGEX.search(cleaned):
+        return True
+    return False
+
+
+def cap_rows(rows: List[Dict], limit: int) -> List[Dict]:
+    if limit <= 0 or len(rows) <= limit:
+        return rows
+    copy = list(rows)
+    random.Random(SEED).shuffle(copy)
+    return copy[:limit]
+
+
+def with_source(rows: List[Dict], source: str) -> List[Dict]:
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["source"] = source
+        out.append(item)
+    return out
+
+
+def source_stats(rows: List[Dict]) -> Dict[str, Dict[str, Any]]:
+    stats: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        source = str(row.get("source", "unknown"))
+        if source not in stats:
+            stats[source] = {
+                "rows": 0,
+                "label_counts": {label: 0 for label in TARGET_LABELS},
+            }
+        stats[source]["rows"] += 1
+        labels = set(row.get("labels", []))
+        for label in TARGET_LABELS:
+            if label in labels:
+                stats[source]["label_counts"][label] += 1
+    return stats
+
+
+def print_source_stats(rows: List[Dict], stage: str) -> None:
+    stats = source_stats(rows)
+    print(f"source stats ({stage}):")
+    ordered_sources = sorted(stats.keys(), key=lambda key: (-int(stats[key]["rows"]), key))
+    for source in ordered_sources:
+        payload = stats[source]
+        labels = payload["label_counts"]
+        print(
+            f"  - {source}: rows={payload['rows']} "
+            f"safe={labels['safe']} "
+            f"prompt_injection={labels['prompt_injection']} "
+            f"exfiltration_intent={labels['exfiltration_intent']} "
+            f"host_takeover_or_jailbreak={labels['host_takeover_or_jailbreak']}"
+        )
+
+
 def load_deepset() -> List[Dict]:
     ds_train = load_dataset("deepset/prompt-injections", split="train")
     ds_test = load_dataset("deepset/prompt-injections", split="test")
     out = []
     for ds in (ds_train, ds_test):
-        for row in ds:
+        for raw_row in ds:
+            row = dict(raw_row)
             text = _safe_text(row, ["text", "prompt", "input"])
             if not text:
                 continue
-            label_val = row.get("label")
+            label_raw = row.get("label", 0)
+            try:
+                label_val = int(label_raw)
+            except (TypeError, ValueError):
+                continue
             labels = ["prompt_injection"] if int(label_val) == 1 else ["safe"]
             if EXFIL_REGEX.search(text):
                 labels.append("exfiltration_intent")
@@ -59,11 +149,12 @@ def load_jbb_behaviors() -> List[Dict]:
         benign = load_dataset("JailbreakBench/JBB-Behaviors", "behaviors", split="benign")
     except Exception:
         ds = load_dataset("JailbreakBench/JBB-Behaviors", "behaviors", split="train")
-        harmful = [row for row in ds if str(row.get("label", "")).lower() == "harmful"]
-        benign = [row for row in ds if str(row.get("label", "")).lower() == "benign"]
+        harmful = [dict(raw_row) for raw_row in ds if str(dict(raw_row).get("label", "")).lower() == "harmful"]
+        benign = [dict(raw_row) for raw_row in ds if str(dict(raw_row).get("label", "")).lower() == "benign"]
 
     out = []
-    for row in harmful:
+    for raw_row in harmful:
+        row = dict(raw_row)
         text = _safe_text(row, ["goal", "behavior", "text", "prompt"])
         if not text:
             continue
@@ -72,7 +163,8 @@ def load_jbb_behaviors() -> List[Dict]:
             labels.append("exfiltration_intent")
         out.append({"text": text, "labels": labels})
 
-    for row in benign:
+    for raw_row in benign:
+        row = dict(raw_row)
         text = _safe_text(row, ["goal", "behavior", "text", "prompt"])
         if not text:
             continue
@@ -84,7 +176,8 @@ def load_jbb_behaviors() -> List[Dict]:
 def load_oasst_benign(limit: int) -> List[Dict]:
     ds = load_dataset("OpenAssistant/oasst1", split="train")
     out = []
-    for row in ds:
+    for raw_row in ds:
+        row = dict(raw_row)
         if row.get("role") != "prompter":
             continue
         if row.get("lang") != "en":
@@ -94,7 +187,7 @@ def load_oasst_benign(limit: int) -> List[Dict]:
         if bool(row.get("review_result", False)) is False:
             continue
 
-        text = _safe_text(row, ["text"])
+        text = normalize_text(_safe_text(row, ["text"]))
         if not text:
             continue
         if len(text) < 24 or len(text) > 900:
@@ -230,6 +323,136 @@ def generate_synthetic_host_takeover(count: int) -> List[Dict]:
     return out
 
 
+def load_neuralchemy_prompt_injection(limit: int) -> List[Dict]:
+    out = []
+    for split in ("train", "validation", "test"):
+        ds = load_dataset("neuralchemy/Prompt-injection-dataset", split=split)
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["text"]))
+            if not text or is_low_quality_text(text):
+                continue
+
+            label_raw = row.get("label", 0)
+            try:
+                label_val = int(label_raw)
+            except (TypeError, ValueError):
+                continue
+            category = str(row.get("category", "")).lower()
+
+            labels = ["safe"] if label_val == 0 else ["prompt_injection"]
+            if label_val == 1 and ("jailbreak" in category or CYBER_ABUSE_REGEX.search(text)):
+                labels.append("host_takeover_or_jailbreak")
+            if EXFIL_REGEX.search(text):
+                labels.append("exfiltration_intent")
+
+            out.append({"text": text, "labels": sorted(set(labels))})
+    return cap_rows(out, limit)
+
+
+def load_smooth3_prompt_attacks(limit: int) -> List[Dict]:
+    out = []
+    for split in ("train", "validation"):
+        ds = load_dataset("Smooth-3/llm-prompt-injection-attacks", split=split)
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["text"]))
+            if not text or is_low_quality_text(text):
+                continue
+
+            raw_labels = row.get("labels", [])
+            if isinstance(raw_labels, str):
+                labels_in = {raw_labels.upper()}
+            else:
+                labels_in = {str(v).upper() for v in raw_labels}
+
+            labels = set()
+            if "BENIGN" in labels_in:
+                labels.add("safe")
+            if "INSTRUCTION_OVERRIDE" in labels_in or "ROLE_HIJACK" in labels_in:
+                labels.add("prompt_injection")
+            if "DATA_EXFILTRATION" in labels_in:
+                labels.add("prompt_injection")
+                labels.add("exfiltration_intent")
+            if "JAILBREAK" in labels_in:
+                labels.add("prompt_injection")
+                labels.add("host_takeover_or_jailbreak")
+
+            if not labels:
+                continue
+            out.append({"text": text, "labels": sorted(labels)})
+    return cap_rows(out, limit)
+
+
+def load_jackhhao_jailbreak(limit: int) -> List[Dict]:
+    out = []
+    for split in ("train", "test"):
+        ds = load_dataset("jackhhao/jailbreak-classification", split=split)
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["prompt", "text"]))
+            if not text or is_low_quality_text(text):
+                continue
+
+            kind = str(row.get("type", "")).strip().lower()
+            if kind == "benign":
+                labels = ["safe"]
+            elif kind == "jailbreak":
+                labels = ["prompt_injection", "host_takeover_or_jailbreak"]
+                if EXFIL_REGEX.search(text):
+                    labels.append("exfiltration_intent")
+            else:
+                continue
+            out.append({"text": text, "labels": sorted(set(labels))})
+    return cap_rows(out, limit)
+
+
+def parse_aegis_categories(raw: str) -> List[str]:
+    value = str(raw or "").strip()
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def load_aegis_v2(limit: int, safe_limit: int) -> List[Dict]:
+    out = []
+    safe_rows = []
+    for split in ("train", "validation", "test"):
+        ds = load_dataset("nvidia/Aegis-AI-Content-Safety-Dataset-2.0", split=split)
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["prompt"]))
+            if not text or is_low_quality_text(text):
+                continue
+
+            prompt_label = str(row.get("prompt_label", "")).strip().lower()
+            categories = set(parse_aegis_categories(row.get("violated_categories", "")))
+
+            if prompt_label == "safe":
+                safe_rows.append({"text": text, "labels": ["safe"]})
+                continue
+
+            labels = set()
+            if categories & AEGIS_HOST_CATEGORIES:
+                labels.add("host_takeover_or_jailbreak")
+            if categories & AEGIS_EXFIL_CATEGORIES:
+                labels.add("exfiltration_intent")
+            if EXFIL_REGEX.search(text):
+                labels.add("exfiltration_intent")
+            if MALICIOUS_HINT_REGEX.search(text) or CYBER_ABUSE_REGEX.search(text):
+                labels.add("prompt_injection")
+            if "host_takeover_or_jailbreak" in labels or "exfiltration_intent" in labels:
+                labels.add("prompt_injection")
+
+            if not labels:
+                continue
+            out.append({"text": text, "labels": sorted(labels)})
+
+    out = cap_rows(out, limit)
+    safe_rows = cap_rows(safe_rows, safe_limit)
+    return out + safe_rows
+
+
 def label_counts(rows: List[Dict]) -> Dict[str, int]:
     counts = {label: 0 for label in TARGET_LABELS}
     for row in rows:
@@ -282,7 +505,7 @@ def write_jsonl(path: Path, rows: List[Dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=True) + "\n")
+            f.write(json.dumps({"text": row["text"], "labels": row["labels"]}, ensure_ascii=True) + "\n")
 
 
 def main() -> None:
@@ -290,6 +513,12 @@ def main() -> None:
     parser.add_argument("--out-dir", default="training/data")
     parser.add_argument("--dataset-profile", default="clean", choices=["clean"])
     parser.add_argument("--oasst-benign-limit", type=int, default=30000)
+    parser.add_argument("--neuralchemy-limit", type=int, default=12000)
+    parser.add_argument("--smooth3-limit", type=int, default=18000)
+    parser.add_argument("--jackhhao-limit", type=int, default=6000)
+
+    parser.add_argument("--aegis-unsafe-limit", type=int, default=12000)
+    parser.add_argument("--aegis-safe-limit", type=int, default=6000)
     parser.add_argument("--min-safe-rows", type=int, default=20000)
     parser.add_argument("--min-prompt-injection-rows", type=int, default=4000)
     parser.add_argument("--min-exfiltration-rows", type=int, default=2500)
@@ -298,24 +527,48 @@ def main() -> None:
     args = parser.parse_args()
 
     rows: List[Dict] = []
-    rows.extend(load_deepset())
-    rows.extend(load_jbb_behaviors())
-    rows.extend(load_oasst_benign(args.oasst_benign_limit))
-    rows.extend(bootstrap_exfiltration_rows())
-    rows.extend(bootstrap_host_takeover_rows())
+    rows.extend(with_source(load_deepset(), "deepset/prompt-injections"))
+    rows.extend(with_source(load_jbb_behaviors(), "JailbreakBench/JBB-Behaviors"))
+    rows.extend(with_source(load_oasst_benign(args.oasst_benign_limit), "OpenAssistant/oasst1"))
+    rows.extend(with_source(load_neuralchemy_prompt_injection(args.neuralchemy_limit), "neuralchemy/Prompt-injection-dataset"))
+    rows.extend(with_source(load_smooth3_prompt_attacks(args.smooth3_limit), "Smooth-3/llm-prompt-injection-attacks"))
+    rows.extend(with_source(load_jackhhao_jailbreak(args.jackhhao_limit), "jackhhao/jailbreak-classification"))
+
+    rows.extend(with_source(load_aegis_v2(args.aegis_unsafe_limit, args.aegis_safe_limit), "nvidia/Aegis-AI-Content-Safety-Dataset-2.0"))
+    rows.extend(with_source(bootstrap_exfiltration_rows(), "bootstrap.exfiltration"))
+    rows.extend(with_source(bootstrap_host_takeover_rows(), "bootstrap.host_takeover"))
+
+    print_source_stats(rows, "raw")
     rows = dedupe_rows(rows)
+    print_source_stats(rows, "deduped")
 
     counts = label_counts(rows)
     if counts["safe"] < args.min_safe_rows:
-        rows.extend(generate_synthetic_benign(args.min_safe_rows - counts["safe"]))
+        rows.extend(with_source(generate_synthetic_benign(args.min_safe_rows - counts["safe"]), "synthetic_fallback.safe"))
     if counts["prompt_injection"] < args.min_prompt_injection_rows:
-        rows.extend(generate_synthetic_prompt_injection(args.min_prompt_injection_rows - counts["prompt_injection"]))
+        rows.extend(
+            with_source(
+                generate_synthetic_prompt_injection(args.min_prompt_injection_rows - counts["prompt_injection"]),
+                "synthetic_fallback.prompt_injection",
+            )
+        )
     if counts["exfiltration_intent"] < args.min_exfiltration_rows:
-        rows.extend(generate_synthetic_exfiltration(args.min_exfiltration_rows - counts["exfiltration_intent"]))
+        rows.extend(
+            with_source(
+                generate_synthetic_exfiltration(args.min_exfiltration_rows - counts["exfiltration_intent"]),
+                "synthetic_fallback.exfiltration",
+            )
+        )
     if counts["host_takeover_or_jailbreak"] < args.min_host_takeover_rows:
-        rows.extend(generate_synthetic_host_takeover(args.min_host_takeover_rows - counts["host_takeover_or_jailbreak"]))
+        rows.extend(
+            with_source(
+                generate_synthetic_host_takeover(args.min_host_takeover_rows - counts["host_takeover_or_jailbreak"]),
+                "synthetic_fallback.host_takeover",
+            )
+        )
 
     rows = dedupe_rows(rows)
+    print_source_stats(rows, "final")
 
     train_rows, val_rows = split_rows(rows, args.val_ratio)
     train_rows, val_rows = ensure_label_presence_in_val(train_rows, val_rows)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -111,4 +112,41 @@ func mustLoadTokenizerFixtures(t *testing.T) []tokenizerFixture {
 		t.Fatal("tokenizer fixtures cannot be empty")
 	}
 	return fixtures
+}
+
+func TestLoadRejectsRegexTokenizerModel(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelPath := filepath.Join(tmpDir, "legacy_regex_model.json")
+
+	payload := map[string]any{
+		"version": "v1",
+		"labels":  []string{"prompt_injection"},
+		"tokenizer": map[string]any{
+			"type":      "regex",
+			"pattern":   `[\\p{L}\\p{N}_]+`,
+			"lowercase": true,
+		},
+		"vocab": map[string]int{"ignore": 0},
+		"weights": map[string][]float64{
+			"prompt_injection": {1.0},
+		},
+		"bias":       map[string]float64{"prompt_injection": 0.0},
+		"thresholds": map[string]float64{"prompt_injection": 0.5},
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(modelPath, b, 0o644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+
+	_, err = Load(modelPath)
+	if err == nil {
+		t.Fatal("expected load error for regex tokenizer")
+	}
+	if !strings.Contains(err.Error(), "invalid tokenizer type") {
+		t.Fatalf("expected invalid tokenizer type error, got: %v", err)
+	}
 }

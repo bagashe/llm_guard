@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server && \
 
 FROM alpine:3.22
 
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S -g 1000 app && adduser -S -u 1000 app -G app
 
 WORKDIR /app
 

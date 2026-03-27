@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -147,9 +148,19 @@ func (m *Model) tokenize(text string) []string {
 		return nil
 	}
 
-	out := make([]string, 0)
+	out := make([]string, 0, len(words)*12)
+
+	rp := runePool.Get().(*[]rune)
+	runes := *rp
+
 	for _, word := range words {
-		runes := []rune(" " + word + " ")
+		runes = runes[:0]
+		runes = append(runes, ' ')
+		for _, r := range word {
+			runes = append(runes, r)
+		}
+		runes = append(runes, ' ')
+
 		for n := m.Tokenizer.NgramMin; n <= m.Tokenizer.NgramMax; n++ {
 			if len(runes) < n {
 				continue
@@ -160,10 +171,20 @@ func (m *Model) tokenize(text string) []string {
 		}
 	}
 
+	*rp = runes
+	runePool.Put(rp)
+
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+var runePool = sync.Pool{
+	New: func() any {
+		s := make([]rune, 0, 64)
+		return &s
+	},
 }
 
 func sigmoid(x float64) float64 {

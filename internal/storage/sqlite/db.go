@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -16,6 +17,11 @@ import (
 func OpenAndInit(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -52,7 +58,10 @@ CREATE TABLE IF NOT EXISTS api_keys (
 }
 
 type APIKeyStore struct {
-	db *sql.DB
+	db      *sql.DB
+	mu      sync.Mutex
+	pending map[int64]int64
+	done    chan struct{}
 }
 
 type APIKeyRecord struct {
@@ -65,7 +74,50 @@ type APIKeyRecord struct {
 }
 
 func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
-	return &APIKeyStore{db: db}
+	s := &APIKeyStore{
+		db:      db,
+		pending: make(map[int64]int64),
+		done:    make(chan struct{}),
+	}
+	go s.flushLoop()
+	return s
+}
+
+func (s *APIKeyStore) flushLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.flush(context.Background())
+		case <-s.done:
+			_ = s.flush(context.Background())
+			return
+		}
+	}
+}
+
+func (s *APIKeyStore) flush(ctx context.Context) error {
+	s.mu.Lock()
+	if len(s.pending) == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	snap := s.pending
+	s.pending = make(map[int64]int64, len(snap))
+	s.mu.Unlock()
+
+	now := time.Now().UTC()
+	for id, count := range snap {
+		const q = `UPDATE api_keys SET last_used_at = ?, usage_count = usage_count + ? WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, q, now, count, id)
+	}
+	return nil
+}
+
+func (s *APIKeyStore) Close() error {
+	close(s.done)
+	return nil
 }
 
 func (s *APIKeyStore) IsValidAPIKey(ctx context.Context, rawKey string) (bool, error) {
@@ -80,8 +132,9 @@ func (s *APIKeyStore) IsValidAPIKey(ctx context.Context, rawKey string) (bool, e
 		return false, err
 	}
 
-	const touch = `UPDATE api_keys SET last_used_at = ?, usage_count = usage_count + 1 WHERE id = ?`
-	_, _ = s.db.ExecContext(ctx, touch, time.Now().UTC(), id)
+	s.mu.Lock()
+	s.pending[id]++
+	s.mu.Unlock()
 	return true, nil
 }
 

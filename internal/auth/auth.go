@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type ctxKey struct{}
@@ -23,19 +25,50 @@ type APIKeyChecker interface {
 	IsValidAPIKey(ctx context.Context, rawKey string) (bool, error)
 }
 
+const cacheTTL = 30 * time.Second
+
+type cacheEntry struct {
+	valid     bool
+	expiresAt time.Time
+}
+
 type Validator struct {
 	checker APIKeyChecker
+	mu      sync.RWMutex
+	cache   map[string]cacheEntry
 }
 
 func NewValidator(checker APIKeyChecker) *Validator {
-	return &Validator{checker: checker}
+	return &Validator{
+		checker: checker,
+		cache:   make(map[string]cacheEntry),
+	}
 }
 
 func (v *Validator) Validate(ctx context.Context, key string) (bool, error) {
 	if key == "" {
 		return false, nil
 	}
-	return v.checker.IsValidAPIKey(ctx, key)
+
+	now := time.Now()
+
+	v.mu.RLock()
+	if e, ok := v.cache[key]; ok && now.Before(e.expiresAt) {
+		v.mu.RUnlock()
+		return e.valid, nil
+	}
+	v.mu.RUnlock()
+
+	valid, err := v.checker.IsValidAPIKey(ctx, key)
+	if err != nil {
+		return false, err
+	}
+
+	v.mu.Lock()
+	v.cache[key] = cacheEntry{valid: valid, expiresAt: now.Add(cacheTTL)}
+	v.mu.Unlock()
+
+	return valid, nil
 }
 
 func BearerMiddleware(v *Validator) func(http.Handler) http.Handler {

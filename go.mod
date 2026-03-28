@@ -1,6 +1,6 @@
 module llm_guard
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.5
@@ -19,6 +19,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

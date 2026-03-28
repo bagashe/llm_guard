@@ -29,7 +29,7 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 		return safety.Match{}, nil
 	}
 
-	preds := r.model.Predict(in.Message)
+	preds := r.model.Predict(NormalizeForEvaluation(in.Message))
 	flagged := make([]string, 0)
 	maxScore := 0.0
 	for _, pred := range preds {

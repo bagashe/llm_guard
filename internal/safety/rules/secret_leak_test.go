@@ -130,9 +130,28 @@ func TestSecretLeakRule(t *testing.T) {
 			wantMatch:   false,
 		},
 		{
+			name:        "tool_result with secret flagged",
+			message:     "The response contained: AKIAIOSFODNN7EXAMPLE",
+			messageType: safety.MessageTypeToolResult,
+			wantMatch:   true,
+			wantDetail:  "AWS access key",
+		},
+		{
 			name:        "user message with secret skipped",
 			message:     "My API key is AKIAIOSFODNN7EXAMPLE, is it leaked?",
 			messageType: safety.MessageTypeUser,
+			wantMatch:   false,
+		},
+		{
+			name:        "tool_call with secret skipped",
+			message:     "AKIAIOSFODNN7EXAMPLE",
+			messageType: safety.MessageTypeToolCall,
+			wantMatch:   false,
+		},
+		{
+			name:        "system with secret skipped",
+			message:     "AKIAIOSFODNN7EXAMPLE",
+			messageType: safety.MessageTypeSystem,
 			wantMatch:   false,
 		},
 		{

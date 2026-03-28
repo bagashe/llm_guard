@@ -65,7 +65,7 @@ func (r *SecretLeakRule) ID() string {
 }
 
 func (r *SecretLeakRule) Evaluate(_ context.Context, in safety.Input) (safety.Match, error) {
-	if in.MessageType != safety.MessageTypeAssistant {
+	if in.MessageType != safety.MessageTypeAssistant && in.MessageType != safety.MessageTypeToolResult {
 		return safety.Match{}, nil
 	}
 

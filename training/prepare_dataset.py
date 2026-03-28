@@ -33,11 +33,7 @@ CYBER_ABUSE_REGEX = re.compile(
 WORDISH_REGEX = re.compile(r"[A-Za-z0-9]")
 
 AEGIS_HOST_CATEGORIES = {
-    "Criminal Planning/Confessions",
     "Malware",
-    "Illegal Activity",
-    "Threat",
-    "Unauthorized Advice",
     "Fraud/Deception",
 }
 AEGIS_EXFIL_CATEGORIES = {
@@ -142,6 +138,14 @@ def load_deepset() -> List[Dict]:
     return out
 
 
+JBB_RELEVANT_CATEGORIES = {
+    "Malware/Hacking",
+    "Fraud/Deception",
+    "Privacy",
+    "Economic harm",
+}
+
+
 def load_jbb_behaviors() -> List[Dict]:
     try:
         harmful = load_dataset("JailbreakBench/JBB-Behaviors", "behaviors", split="harmful")
@@ -154,6 +158,9 @@ def load_jbb_behaviors() -> List[Dict]:
     out = []
     for raw_row in harmful:
         row = dict(raw_row)
+        category = str(row.get("Category", row.get("category", ""))).strip()
+        if category not in JBB_RELEVANT_CATEGORIES:
+            continue
         text = _safe_text(row, ["goal", "behavior", "text", "prompt"])
         if not text:
             continue
@@ -452,6 +459,91 @@ def load_aegis_v2(limit: int, safe_limit: int) -> List[Dict]:
     return out + safe_rows
 
 
+JAILBREAKV_RELEVANT_POLICIES = {
+    "Malware",
+    "Fraud",
+    "Economic Harm",
+    "Privacy Violation",
+}
+
+
+def load_reshabhs_spml(limit: int) -> List[Dict]:
+    """reshabhs/SPML_Chatbot_Prompt_Injection — MIT — 16K chatbot prompt injection rows.
+    Fields: 'User Prompt' (text), 'Prompt injection' (0/1 label).
+    """
+    out = []
+    try:
+        ds = load_dataset("reshabhs/SPML_Chatbot_Prompt_Injection", split="train")
+    except Exception:
+        return out
+    for raw_row in ds:
+        row = dict(raw_row)
+        text = normalize_text(_safe_text(row, ["User Prompt", "prompt", "text", "input"]))
+        if not text or is_low_quality_text(text):
+            continue
+        label_raw = row.get("Prompt injection", row.get("label", row.get("Label", -1)))
+        try:
+            label_val = int(label_raw)
+        except (TypeError, ValueError):
+            continue
+        if label_val == 1:
+            labels: List[str] = ["prompt_injection"]
+            if EXFIL_REGEX.search(text):
+                labels.append("exfiltration_intent")
+        elif label_val == 0:
+            labels = ["safe"]
+        else:
+            continue
+        out.append({"text": text, "labels": sorted(set(labels))})
+    return cap_rows(out, limit)
+
+
+def load_jailbreakv_28k(limit: int) -> List[Dict]:
+    """JailbreakV-28K/JailBreakV-28k — MIT — multimodal jailbreak benchmark; text-only extraction.
+    Config: JailBreakV_28K, split: JailBreakV_28K.
+    Filtered to security-relevant policy values: Malware, Fraud, Economic Harm, Privacy Violation.
+    """
+    out = []
+    try:
+        ds = load_dataset("JailbreakV-28K/JailBreakV-28k", "JailBreakV_28K", split="JailBreakV_28K")
+    except Exception:
+        return out
+    for raw_row in ds:
+        row = dict(raw_row)
+        policy = str(row.get("policy", "")).strip()
+        if policy not in JAILBREAKV_RELEVANT_POLICIES:
+            continue
+        text = normalize_text(_safe_text(row, ["jailbreak_query", "redteam_query", "query", "text"]))
+        if not text or is_low_quality_text(text):
+            continue
+        labels: List[str] = ["host_takeover_or_jailbreak"]
+        if policy == "Privacy Violation" or EXFIL_REGEX.search(text):
+            labels.append("exfiltration_intent")
+        out.append({"text": text, "labels": sorted(set(labels))})
+    return cap_rows(out, limit)
+
+
+def load_zefang_phishing(limit: int) -> List[Dict]:
+    """zefang-liu/phishing-email-dataset — LGPL-3.0 — phishing emails for exfiltration_intent coverage."""
+    out = []
+    for split in ("train", "test"):
+        try:
+            ds = load_dataset("zefang-liu/phishing-email-dataset", split=split)
+        except Exception:
+            continue
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["text", "email", "Email Text", "body", "content", "message", "subject"]))
+            if not text or is_low_quality_text(text):
+                continue
+            label_raw = str(row.get("label", row.get("Label", row.get("type", row.get("Email Type", ""))))).strip().lower()
+            if label_raw in ("1", "phishing", "phishing email", "spam", "fraud"):
+                out.append({"text": text, "labels": ["exfiltration_intent"]})
+            elif label_raw in ("0", "legitimate", "legitimate email", "ham", "safe"):
+                out.append({"text": text, "labels": ["safe"]})
+    return cap_rows(out, limit)
+
+
 def label_counts(rows: List[Dict]) -> Dict[str, int]:
     counts = {label: 0 for label in TARGET_LABELS}
     for row in rows:
@@ -516,6 +608,10 @@ def main() -> None:
     parser.add_argument("--smooth3-limit", type=int, default=18000)
     parser.add_argument("--jackhhao-limit", type=int, default=6000)
 
+    parser.add_argument("--spml-limit", type=int, default=16000)
+    parser.add_argument("--jailbreakv-limit", type=int, default=10000)
+    parser.add_argument("--phishing-limit", type=int, default=10000)
+
     parser.add_argument("--aegis-unsafe-limit", type=int, default=12000)
     parser.add_argument("--aegis-safe-limit", type=int, default=6000)
     parser.add_argument("--min-safe-rows", type=int, default=20000)
@@ -534,6 +630,9 @@ def main() -> None:
     rows.extend(with_source(load_jackhhao_jailbreak(args.jackhhao_limit), "jackhhao/jailbreak-classification"))
 
     rows.extend(with_source(load_aegis_v2(args.aegis_unsafe_limit, args.aegis_safe_limit), "nvidia/Aegis-AI-Content-Safety-Dataset-2.0"))
+    rows.extend(with_source(load_reshabhs_spml(args.spml_limit), "reshabhs/SPML_Chatbot_Prompt_Injection"))
+    rows.extend(with_source(load_jailbreakv_28k(args.jailbreakv_limit), "JailbreakV-28K/JailBreakV-28k"))
+    rows.extend(with_source(load_zefang_phishing(args.phishing_limit), "zefang-liu/phishing-email-dataset"))
     rows.extend(with_source(bootstrap_exfiltration_rows(), "bootstrap.exfiltration"))
     rows.extend(with_source(bootstrap_host_takeover_rows(), "bootstrap.host_takeover"))
 

@@ -14,5 +14,9 @@
   {
     "input": "\u00c9x",
     "tokens": [" \u00e9x", "\u00e9x ", " \u00e9x "]
+  },
+  {
+    "input": "a\u00a0b",
+    "tokens": [" a ", " b "]
   }
 ]

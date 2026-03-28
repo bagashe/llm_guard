@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,10 +25,14 @@ LABELS = [
 TOKENIZER_TYPE = "char_ngram_wb"
 TOKENIZER_LOWERCASE = True
 
+# Matches exactly the characters treated as whitespace by Go's strings.Fields / unicode.IsSpace:
+# U+0009 TAB, U+000A LF, U+000D CR, U+000B VT, U+000C FF, U+0020 SPACE, U+0085 NEL, U+00A0 NBSP.
+_FIELDS_RE = re.compile(r"[\t\n\r\x0b\x0c \u0085\u00a0]+")
+
 
 def tokenize_text_char_ngram_wb(text: str, min_n: int, max_n: int) -> list[str]:
     value = text.lower() if TOKENIZER_LOWERCASE else text
-    words = value.split()
+    words = [w for w in _FIELDS_RE.split(value) if w]
     out: list[str] = []
     for word in words:
         if not word:

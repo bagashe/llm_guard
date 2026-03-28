@@ -29,6 +29,39 @@ TOKENIZER_LOWERCASE = True
 # U+0009 TAB, U+000A LF, U+000D CR, U+000B VT, U+000C FF, U+0020 SPACE, U+0085 NEL, U+00A0 NBSP.
 _FIELDS_RE = re.compile(r"[\t\n\r\x0b\x0c \u0085\u00a0]+")
 
+STOP_WORDS = frozenset({
+    "a", "all", "also", "am", "an", "any", "are", "as", "at",
+    "be", "been", "being", "but", "by",
+    "can", "could",
+    "did", "do", "does", "during",
+    "each", "either", "every",
+    "for", "from", "further",
+    "had", "has", "have", "he", "her", "him", "his", "how",
+    "i", "if", "in", "into", "is", "it", "its",
+    "just",
+    "may", "me", "might", "more", "most", "my",
+    "neither", "no", "nor", "not",
+    "of", "on", "only", "or", "other", "our", "out", "over",
+    "shall", "she", "since", "so", "some", "such",
+    "than", "that", "the", "their", "them", "then", "these", "they",
+    "this", "those", "through", "to",
+    "under", "until", "us",
+    "very",
+    "was", "we", "were", "what", "when", "which", "while", "who",
+    "will", "with", "would",
+    "yet", "you", "your",
+})
+
+
+def tokenize_text_word_ngram(text: str, ngram_min: int, ngram_max: int) -> list[str]:
+    """Word n-gram tokenizer with stop word filtering, matching Go's tokenizeWordNgramInto."""
+    words = [w for w in text.lower().split() if w and w not in STOP_WORDS]
+    out: list[str] = []
+    for n in range(ngram_min, ngram_max + 1):
+        for i in range(len(words) - n + 1):
+            out.append(" ".join(words[i : i + n]))
+    return out
+
 
 def tokenize_text_char_ngram_wb(text: str, min_n: int, max_n: int) -> list[str]:
     value = text.lower() if TOKENIZER_LOWERCASE else text
@@ -92,14 +125,37 @@ def main() -> None:
     parser.add_argument("--out", default="models/classifier_v1.json")
     parser.add_argument("--metrics-out", default="training/artifacts/classifier_v1_metrics.json")
     parser.add_argument("--max-features", type=int, default=50000)
+    parser.add_argument("--tokenizer", choices=["char_ngram_wb", "word_ngram"], default="char_ngram_wb")
     parser.add_argument("--char-ngram-min", type=int, default=3)
     parser.add_argument("--char-ngram-max", type=int, default=5)
+    parser.add_argument("--word-ngram-min", type=int, default=1)
+    parser.add_argument("--word-ngram-max", type=int, default=2)
     args = parser.parse_args()
 
-    if args.char_ngram_min < 1:
-        raise ValueError("--char-ngram-min must be >= 1")
-    if args.char_ngram_max < args.char_ngram_min:
-        raise ValueError("--char-ngram-max must be >= --char-ngram-min")
+    if args.tokenizer == "char_ngram_wb":
+        if args.char_ngram_min < 1:
+            raise ValueError("--char-ngram-min must be >= 1")
+        if args.char_ngram_max < args.char_ngram_min:
+            raise ValueError("--char-ngram-max must be >= --char-ngram-min")
+        tokenize_fn = lambda value: tokenize_text_char_ngram_wb(value, args.char_ngram_min, args.char_ngram_max)
+        tokenizer_config = {
+            "type": TOKENIZER_TYPE,
+            "lowercase": TOKENIZER_LOWERCASE,
+            "ngram_min": args.char_ngram_min,
+            "ngram_max": args.char_ngram_max,
+        }
+    else:
+        if args.word_ngram_min < 1:
+            raise ValueError("--word-ngram-min must be >= 1")
+        if args.word_ngram_max < args.word_ngram_min:
+            raise ValueError("--word-ngram-max must be >= --word-ngram-min")
+        tokenize_fn = lambda value: tokenize_text_word_ngram(value, args.word_ngram_min, args.word_ngram_max)
+        tokenizer_config = {
+            "type": "word_ngram",
+            "lowercase": True,
+            "ngram_min": args.word_ngram_min,
+            "ngram_max": args.word_ngram_max,
+        }
 
     train_rows = read_jsonl(Path(args.train))
     val_rows = read_jsonl(Path(args.val))
@@ -109,7 +165,7 @@ def main() -> None:
     vectorizer = CountVectorizer(
         lowercase=False,
         max_features=args.max_features,
-        tokenizer=lambda value: tokenize_text_char_ngram_wb(value, args.char_ngram_min, args.char_ngram_max),
+        tokenizer=tokenize_fn,
         preprocessor=None,
         token_pattern=cast(Any, None),
     )
@@ -159,12 +215,7 @@ def main() -> None:
     out = {
         "version": "v1",
         "labels": LABELS,
-        "tokenizer": {
-            "type": TOKENIZER_TYPE,
-            "lowercase": TOKENIZER_LOWERCASE,
-            "ngram_min": args.char_ngram_min,
-            "ngram_max": args.char_ngram_max,
-        },
+        "tokenizer": tokenizer_config,
         "vocab": vocab,
         "weights": weights,
         "bias": bias,

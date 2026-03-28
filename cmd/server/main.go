@@ -77,7 +77,15 @@ func main() {
 		log.Fatalf("load classifier path=%s: %v", cfg.ClassifierPath, err)
 	}
 	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
-	engine.Register(rules.NewClassifierRule(clf))
+	var wordClf *classifier.Model
+	if cfg.WordClassifierPath != "" {
+		wordClf, err = classifier.Load(cfg.WordClassifierPath)
+		if err != nil {
+			log.Fatalf("load word classifier path=%s: %v", cfg.WordClassifierPath, err)
+		}
+		log.Printf("word classifier loaded path=%s labels=%d", cfg.WordClassifierPath, len(wordClf.Labels))
+	}
+	engine.Register(rules.NewClassifierRule(clf, wordClf))
 	log.Println("input rules registered: classifier.malicious_intent,input.pii_detection")
 	engine.Register(rules.NewPIIDetectionRule())
 	engine.Register(rules.NewSystemPromptLeakRule())

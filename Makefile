@@ -6,7 +6,7 @@ ARCHES := amd64 arm64
 CURRENT_OS := $(shell go env GOOS)
 CURRENT_ARCH := $(shell go env GOARCH)
 
-.PHONY: all build release clean train-prepare train-model validate-model smoke docker-build docker-up docker-down
+.PHONY: all build release clean train-prepare train-model train-word-model validate-model smoke docker-build docker-up docker-down
 
 all: build
 
@@ -37,10 +37,22 @@ train-prepare:
 train-model:
 	python3 -m uv run --project training python training/train_classifier.py --train training/data/train.jsonl --val training/data/val.jsonl --out models/classifier_v1.json --metrics-out training/artifacts/classifier_v1_metrics.json
 
+train-word-model:
+	python3 -m uv run --project training python training/train_classifier.py \
+		--tokenizer word_ngram \
+		--train training/data/train.jsonl \
+		--val training/data/val.jsonl \
+		--out models/word_classifier_v1.json \
+		--metrics-out training/artifacts/word_classifier_v1_metrics.json \
+		--max-features 30000 \
+		--word-ngram-min 1 \
+		--word-ngram-max 2
+
 validate-model:
 	@test -f models/classifier_v1.json || (echo "missing model: models/classifier_v1.json" && exit 1)
+	@test -f models/word_classifier_v1.json || (echo "missing model: models/word_classifier_v1.json" && exit 1)
 	@go test ./internal/classifier -run TestPredictWithTrainedModel -count=1
-	@go test ./internal/safety/rules -run "TestClassifierRuleWithTrainedModel|TestClassifierRuleToolResultIndirectInjection" -count=1
+	@go test ./internal/safety/rules -run "TestClassifierRuleWithTrainedModel|TestClassifierRuleToolResultIndirectInjection|TestClassifierRuleSlidingWindowCatchesEmbeddedAttack" -count=1
 
 smoke:
 	@test -n "$(API_KEY)" || (echo "set API_KEY before running make smoke" && exit 1)

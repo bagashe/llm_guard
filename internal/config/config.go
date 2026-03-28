@@ -11,6 +11,7 @@ type Config struct {
 	DatabasePath          string
 	GeoIPDBPath           string
 	ClassifierPath        string
+	WordClassifierPath    string
 	CountryBlacklist      map[string]struct{}
 	DomainBlacklistPath   string
 	InternalAllowlistPath string
@@ -30,6 +31,7 @@ func LoadFromEnv() Config {
 		DatabasePath:          getString("DATABASE_PATH", "./storage/llm_guard.db"),
 		GeoIPDBPath:           getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
 		ClassifierPath:        getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
+		WordClassifierPath:    getString("WORD_CLASSIFIER_PATH", ""),
 		CountryBlacklist:      toSetCSV(getString("COUNTRY_BLACKLIST", "")),
 		DomainBlacklistPath:   getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
 		InternalAllowlistPath: getString("INTERNAL_DESTINATION_ALLOWLIST_PATH", "./config/internal_destination_allowlist.txt"),

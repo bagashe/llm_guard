@@ -21,18 +21,27 @@ const (
 )
 
 type ClassifierRule struct {
-	model *classifier.Model
+	models []*classifier.Model
 }
 
-func NewClassifierRule(model *classifier.Model) safety.Rule {
-	return ClassifierRule{model: model}
+// NewClassifierRule accepts one or more models (char n-gram, word n-gram, …)
+// and scores them as an ensemble. Nil models are silently dropped.
+// Existing callers that pass a single model continue to work unchanged.
+func NewClassifierRule(models ...*classifier.Model) safety.Rule {
+	ms := make([]*classifier.Model, 0, len(models))
+	for _, m := range models {
+		if m != nil {
+			ms = append(ms, m)
+		}
+	}
+	return ClassifierRule{models: ms}
 }
 
 func (r ClassifierRule) ID() string {
 	return "classifier.malicious_intent"
 }
 
-// Evaluate runs the ML classifier on user and tool_result messages.
+// Evaluate runs the ML classifier ensemble on user and tool_result messages.
 // tool_result is included to catch indirect prompt injection embedded in
 // tool outputs (e.g. a fetched webpage containing "ignore all instructions").
 // system, assistant, and tool_call messages are skipped.
@@ -41,7 +50,7 @@ func (r ClassifierRule) ID() string {
 // maximum score across all windows is returned. This prevents benign context
 // surrounding an attack phrase from diluting the classifier score.
 func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Match, error) {
-	if r.model == nil {
+	if len(r.models) == 0 {
 		return safety.Match{}, nil
 	}
 	if in.MessageType != safety.MessageTypeUser && in.MessageType != safety.MessageTypeToolResult {
@@ -81,24 +90,35 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	return best, nil
 }
 
-// scoreWindow runs the classifier on a slice of words and returns a Match if
-// any label exceeds its threshold. It calls PredictWords to avoid the
-// Join → ToLower → Fields round-trip that Predict would require.
+// scoreWindow scores all ensemble models on a slice of words and merges the
+// results. The highest score per label is kept (deduplicates when both models
+// flag the same label). Calls PredictWords to avoid the Join→ToLower→Fields
+// round-trip that Predict would require.
 func (r ClassifierRule) scoreWindow(words []string) (safety.Match, error) {
-	preds := r.model.PredictWords(words)
-	var flagged []string
-	maxScore := 0.0
-	for _, pred := range preds {
-		threshold := r.model.Thresholds[pred.Label]
-		if pred.Score >= threshold {
-			flagged = append(flagged, fmt.Sprintf("%s=%.3f", pred.Label, pred.Score))
-			if pred.Score > maxScore {
-				maxScore = pred.Score
+	// bestPerLabel tracks the highest score seen for each flagged label
+	// across all ensemble models.
+	bestPerLabel := make(map[string]float64, 4)
+	for _, m := range r.models {
+		for _, pred := range m.PredictWords(words) {
+			threshold := m.Thresholds[pred.Label]
+			if pred.Score >= threshold {
+				if pred.Score > bestPerLabel[pred.Label] {
+					bestPerLabel[pred.Label] = pred.Score
+				}
 			}
 		}
 	}
-	if len(flagged) == 0 {
+	if len(bestPerLabel) == 0 {
 		return safety.Match{}, nil
+	}
+
+	flagged := make([]string, 0, len(bestPerLabel))
+	maxScore := 0.0
+	for label, score := range bestPerLabel {
+		flagged = append(flagged, fmt.Sprintf("%s=%.3f", label, score))
+		if score > maxScore {
+			maxScore = score
+		}
 	}
 	return safety.Match{
 		Matched: true,

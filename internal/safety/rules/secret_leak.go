@@ -64,6 +64,11 @@ func (r *SecretLeakRule) ID() string {
 	return "output.secret_leak"
 }
 
+// Evaluate scans assistant and tool_result messages for secrets.
+// assistant covers LLM output that might inadvertently echo a credential.
+// tool_result covers secrets returned by tools (e.g. a file read or env dump)
+// before they are forwarded back to the model or the caller.
+// user, system, and tool_call messages are skipped.
 func (r *SecretLeakRule) Evaluate(_ context.Context, in safety.Input) (safety.Match, error) {
 	if in.MessageType != safety.MessageTypeAssistant && in.MessageType != safety.MessageTypeToolResult {
 		return safety.Match{}, nil

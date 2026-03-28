@@ -21,6 +21,10 @@ func (r ClassifierRule) ID() string {
 	return "classifier.malicious_intent"
 }
 
+// Evaluate runs the ML classifier on user and tool_result messages.
+// tool_result is included to catch indirect prompt injection embedded in
+// tool outputs (e.g. a fetched webpage containing "ignore all instructions").
+// system, assistant, and tool_call messages are skipped.
 func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Match, error) {
 	if r.model == nil {
 		return safety.Match{}, nil

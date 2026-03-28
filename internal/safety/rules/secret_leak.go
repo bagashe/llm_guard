@@ -35,6 +35,15 @@ func NewSecretLeakRule() safety.Rule {
 		{"Slack token", `xox[bpras]-[0-9a-zA-Z\-]{10,}`},
 		{"Stripe key", `sk_(live|test)_[A-Za-z0-9]{20,}`},
 		{"Google API key", `AIza[0-9A-Za-z\-_]{35}`},
+		{"Anthropic API key", `sk-ant-[A-Za-z0-9\-_]{90,}`},
+		{"OpenAI API key", `sk-[A-Za-z0-9]{48}`},
+		{"OpenAI project key", `sk-proj-[A-Za-z0-9\-_]{40,}`},
+		{"HuggingFace token", `hf_[A-Za-z0-9]{34,}`},
+		{"Twilio account SID", `AC[a-f0-9]{32}`},
+		{"Twilio auth token", `SK[a-f0-9]{32}`},
+		{"SendGrid API key", `SG\.[A-Za-z0-9\-_]{22,}\.[A-Za-z0-9\-_]{40,}`},
+		{"npm token", `npm_[A-Za-z0-9]{36}`},
+		{"DigitalOcean token", `dop_v1_[a-f0-9]{64}`},
 	}
 
 	patterns := make([]secretPattern, 0, len(raw))
@@ -56,7 +65,7 @@ func (r *SecretLeakRule) ID() string {
 }
 
 func (r *SecretLeakRule) Evaluate(_ context.Context, in safety.Input) (safety.Match, error) {
-	if in.MessageType != safety.MessageTypeAssistant {
+	if in.MessageType != safety.MessageTypeAssistant && in.MessageType != safety.MessageTypeToolResult {
 		return safety.Match{}, nil
 	}
 

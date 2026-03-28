@@ -25,11 +25,11 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	if r.model == nil {
 		return safety.Match{}, nil
 	}
-	if in.MessageType != safety.MessageTypeUser {
+	if in.MessageType != safety.MessageTypeUser && in.MessageType != safety.MessageTypeToolResult {
 		return safety.Match{}, nil
 	}
 
-	preds := r.model.Predict(in.Message)
+	preds := r.model.Predict(NormalizeForEvaluation(in.Message))
 	flagged := make([]string, 0)
 	maxScore := 0.0
 	for _, pred := range preds {

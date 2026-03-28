@@ -40,7 +40,7 @@ train-model:
 validate-model:
 	@test -f models/classifier_v1.json || (echo "missing model: models/classifier_v1.json" && exit 1)
 	@go test ./internal/classifier -run TestPredictWithTrainedModel -count=1
-	@go test ./internal/safety/rules -run TestClassifierRuleWithTrainedModel -count=1
+	@go test ./internal/safety/rules -run "TestClassifierRuleWithTrainedModel|TestClassifierRuleToolResultIndirectInjection" -count=1
 
 smoke:
 	@test -n "$(API_KEY)" || (echo "set API_KEY before running make smoke" && exit 1)

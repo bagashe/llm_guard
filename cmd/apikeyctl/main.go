@@ -41,6 +41,26 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
+	case "quota":
+		if len(os.Args) < 3 {
+			printUsage()
+			os.Exit(2)
+		}
+		switch os.Args[2] {
+		case "set":
+			if err := runQuotaSet(os.Args[3:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+		case "clear":
+			if err := runQuotaClear(os.Args[3:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+		default:
+			printUsage()
+			os.Exit(2)
+		}
 	default:
 		printUsage()
 		os.Exit(2)
@@ -140,24 +160,107 @@ func runList(args []string) error {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tACTIVE\tCREATED_AT\tLAST_USED_AT\tUSAGE_COUNT")
+	fmt.Fprintln(tw, "ID\tNAME\tACTIVE\tCREATED_AT\tLAST_USED_AT\tUSAGE_COUNT\tDAILY_LIMIT\tDAILY_COUNT\tDAILY_WINDOW")
 	for _, k := range keys {
 		lastUsed := ""
 		if k.LastUsedAt != nil {
 			lastUsed = k.LastUsedAt.UTC().Format(time.RFC3339)
 		}
+		dailyLimit := "unlimited"
+		if k.DailyLimit != nil {
+			dailyLimit = strconv.FormatInt(*k.DailyLimit, 10)
+		}
 		fmt.Fprintf(
 			tw,
-			"%d\t%s\t%s\t%s\t%s\t%d\n",
+			"%d\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
 			k.ID,
 			k.Name,
 			strconv.FormatBool(k.Active),
 			k.CreatedAt.UTC().Format(time.RFC3339),
 			lastUsed,
 			k.UsageCount,
+			dailyLimit,
+			k.DailyCount,
+			k.DailyWindow,
 		)
 	}
 	return tw.Flush()
+}
+
+func runQuotaSet(args []string) error {
+	fs := flag.NewFlagSet("quota set", flag.ContinueOnError)
+	dbPath := fs.String("db", "./storage/llm_guard.db", "path to sqlite database")
+	id := fs.Int64("id", 0, "api key id")
+	name := fs.String("name", "", "api key name")
+	daily := fs.Int64("daily", 0, "daily request limit (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *id == 0 && *name == "" {
+		return errors.New("provide either -id or -name")
+	}
+	if *daily <= 0 {
+		return errors.New("-daily must be a positive integer")
+	}
+
+	store, closeFn, err := openStore(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+
+	if *id != 0 {
+		err = store.SetDailyQuotaByID(context.Background(), *id, *daily)
+	} else {
+		err = store.SetDailyQuotaByName(context.Background(), *name, *daily)
+	}
+	if err != nil {
+		return err
+	}
+
+	if *id != 0 {
+		fmt.Printf("set daily quota id=%d daily_limit=%d\n", *id, *daily)
+	} else {
+		fmt.Printf("set daily quota name=%s daily_limit=%d\n", *name, *daily)
+	}
+	return nil
+}
+
+func runQuotaClear(args []string) error {
+	fs := flag.NewFlagSet("quota clear", flag.ContinueOnError)
+	dbPath := fs.String("db", "./storage/llm_guard.db", "path to sqlite database")
+	id := fs.Int64("id", 0, "api key id")
+	name := fs.String("name", "", "api key name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *id == 0 && *name == "" {
+		return errors.New("provide either -id or -name")
+	}
+
+	store, closeFn, err := openStore(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+
+	if *id != 0 {
+		err = store.ClearDailyQuotaByID(context.Background(), *id)
+	} else {
+		err = store.ClearDailyQuotaByName(context.Background(), *name)
+	}
+	if err != nil {
+		return err
+	}
+
+	if *id != 0 {
+		fmt.Printf("cleared daily quota id=%d\n", *id)
+	} else {
+		fmt.Printf("cleared daily quota name=%s\n", *name)
+	}
+	return nil
 }
 
 func openStore(dbPath string) (*sqlite.APIKeyStore, func() error, error) {
@@ -180,7 +283,9 @@ func printUsage() {
 	fmt.Println("apikeyctl manages llm_guard API keys")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  apikeyctl create [-db path] [-name value]")
-	fmt.Println("  apikeyctl revoke [-db path] (-id value | -name value)")
-	fmt.Println("  apikeyctl list   [-db path]")
+	fmt.Println("  apikeyctl create      [-db path] [-name value]")
+	fmt.Println("  apikeyctl revoke      [-db path] (-id value | -name value)")
+	fmt.Println("  apikeyctl list        [-db path]")
+	fmt.Println("  apikeyctl quota set   [-db path] (-id value | -name value) -daily N")
+	fmt.Println("  apikeyctl quota clear [-db path] (-id value | -name value)")
 }

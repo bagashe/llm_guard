@@ -12,6 +12,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"llm_guard/internal/quota"
 )
 
 func OpenAndInit(path string) (*sql.DB, error) {
@@ -49,10 +51,16 @@ CREATE TABLE IF NOT EXISTS api_keys (
 		return err
 	}
 
-	const addUsageCount = `ALTER TABLE api_keys ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0`
-	_, err := db.Exec(addUsageCount)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
+	migrations := []string{
+		`ALTER TABLE api_keys ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE api_keys ADD COLUMN daily_limit INTEGER`,
+		`ALTER TABLE api_keys ADD COLUMN daily_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE api_keys ADD COLUMN daily_window TEXT`,
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
 	}
 	return nil
 }
@@ -65,12 +73,15 @@ type APIKeyStore struct {
 }
 
 type APIKeyRecord struct {
-	ID         int64
-	Name       string
-	Active     bool
-	CreatedAt  time.Time
-	LastUsedAt *time.Time
-	UsageCount int64
+	ID          int64
+	Name        string
+	Active      bool
+	CreatedAt   time.Time
+	LastUsedAt  *time.Time
+	UsageCount  int64
+	DailyLimit  *int64
+	DailyCount  int64
+	DailyWindow string
 }
 
 func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
@@ -108,9 +119,16 @@ func (s *APIKeyStore) flush(ctx context.Context) error {
 	s.mu.Unlock()
 
 	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
 	for id, count := range snap {
-		const q = `UPDATE api_keys SET last_used_at = ?, usage_count = usage_count + ? WHERE id = ?`
-		_, _ = s.db.ExecContext(ctx, q, now, count, id)
+		const q = `
+UPDATE api_keys SET
+	last_used_at  = ?,
+	usage_count   = usage_count + ?,
+	daily_count   = CASE WHEN daily_window = ? THEN daily_count + ? ELSE ? END,
+	daily_window  = ?
+WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, q, now, count, today, count, count, today, id)
 	}
 	return nil
 }
@@ -122,14 +140,28 @@ func (s *APIKeyStore) Close() error {
 
 func (s *APIKeyStore) IsValidAPIKey(ctx context.Context, rawKey string) (bool, error) {
 	hash := hashAPIKey(rawKey)
-	const q = `SELECT id FROM api_keys WHERE key_hash = ? AND active = 1 LIMIT 1`
+	const q = `SELECT id, daily_limit, daily_count, daily_window FROM api_keys WHERE key_hash = ? AND active = 1 LIMIT 1`
 	var id int64
-	err := s.db.QueryRowContext(ctx, q, hash).Scan(&id)
+	var dailyLimit sql.NullInt64
+	var dailyCount int64
+	var dailyWindow sql.NullString
+	err := s.db.QueryRowContext(ctx, q, hash).Scan(&id, &dailyLimit, &dailyCount, &dailyWindow)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+
+	if dailyLimit.Valid {
+		today := time.Now().UTC().Format("2006-01-02")
+		effective := dailyCount
+		if !dailyWindow.Valid || dailyWindow.String != today {
+			effective = 0
+		}
+		if effective >= dailyLimit.Int64 {
+			return false, quota.ErrDailyQuotaExceeded
+		}
 	}
 
 	s.mu.Lock()
@@ -187,9 +219,79 @@ func (s *APIKeyStore) RevokeAPIKeyByName(ctx context.Context, name string) (bool
 	return n > 0, nil
 }
 
+func (s *APIKeyStore) SetDailyQuotaByID(ctx context.Context, id int64, limit int64) error {
+	const stmt = `UPDATE api_keys SET daily_limit = ? WHERE id = ?`
+	res, err := s.db.ExecContext(ctx, stmt, limit, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("no api key found with that id")
+	}
+	return nil
+}
+
+func (s *APIKeyStore) SetDailyQuotaByName(ctx context.Context, name string, limit int64) error {
+	if name == "" {
+		return errors.New("name is required")
+	}
+	const stmt = `UPDATE api_keys SET daily_limit = ? WHERE name = ?`
+	res, err := s.db.ExecContext(ctx, stmt, limit, name)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("no api key found with that name")
+	}
+	return nil
+}
+
+func (s *APIKeyStore) ClearDailyQuotaByID(ctx context.Context, id int64) error {
+	const stmt = `UPDATE api_keys SET daily_limit = NULL WHERE id = ?`
+	res, err := s.db.ExecContext(ctx, stmt, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("no api key found with that id")
+	}
+	return nil
+}
+
+func (s *APIKeyStore) ClearDailyQuotaByName(ctx context.Context, name string) error {
+	if name == "" {
+		return errors.New("name is required")
+	}
+	const stmt = `UPDATE api_keys SET daily_limit = NULL WHERE name = ?`
+	res, err := s.db.ExecContext(ctx, stmt, name)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("no api key found with that name")
+	}
+	return nil
+}
+
 func (s *APIKeyStore) ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error) {
 	const q = `
-SELECT id, name, active, created_at, last_used_at, usage_count
+SELECT id, name, active, created_at, last_used_at, usage_count, daily_limit, daily_count, daily_window
 FROM api_keys
 ORDER BY id ASC
 `
@@ -204,13 +306,22 @@ ORDER BY id ASC
 		var rec APIKeyRecord
 		var activeInt int
 		var lastUsed sql.NullTime
-		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed, &rec.UsageCount); err != nil {
+		var dailyLimit sql.NullInt64
+		var dailyWindow sql.NullString
+		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed, &rec.UsageCount, &dailyLimit, &rec.DailyCount, &dailyWindow); err != nil {
 			return nil, err
 		}
 		rec.Active = activeInt == 1
 		if lastUsed.Valid {
 			v := lastUsed.Time
 			rec.LastUsedAt = &v
+		}
+		if dailyLimit.Valid {
+			v := dailyLimit.Int64
+			rec.DailyLimit = &v
+		}
+		if dailyWindow.Valid {
+			rec.DailyWindow = dailyWindow.String
 		}
 		out = append(out, rec)
 	}

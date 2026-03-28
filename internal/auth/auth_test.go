@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"llm_guard/internal/quota"
 )
 
 type stubChecker struct {
@@ -32,6 +34,7 @@ func TestBearerMiddleware(t *testing.T) {
 		{name: "invalid key", authHeader: "Bearer bad", checkerValid: false, wantStatus: http.StatusUnauthorized},
 		{name: "valid key", authHeader: "Bearer good", checkerValid: true, wantStatus: http.StatusOK},
 		{name: "lowercase bearer prefix", authHeader: "bearer good", checkerValid: true, wantStatus: http.StatusOK},
+		{name: "daily quota exceeded", authHeader: "Bearer capped", checkerErr: quota.ErrDailyQuotaExceeded, wantStatus: http.StatusTooManyRequests},
 	}
 
 	for _, tc := range tests {

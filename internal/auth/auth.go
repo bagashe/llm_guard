@@ -2,10 +2,13 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"llm_guard/internal/quota"
 )
 
 type ctxKey struct{}
@@ -25,10 +28,12 @@ type APIKeyChecker interface {
 	IsValidAPIKey(ctx context.Context, rawKey string) (bool, error)
 }
 
-const cacheTTL = 30 * time.Second
+const cacheTTL      = 30 * time.Second
+const quotaCacheTTL = 5 * time.Second
 
 type cacheEntry struct {
 	valid     bool
+	err       error // non-nil for special rejections (e.g. quota exceeded)
 	expiresAt time.Time
 }
 
@@ -55,11 +60,17 @@ func (v *Validator) Validate(ctx context.Context, key string) (bool, error) {
 	v.mu.RLock()
 	if e, ok := v.cache[key]; ok && now.Before(e.expiresAt) {
 		v.mu.RUnlock()
-		return e.valid, nil
+		return e.valid, e.err
 	}
 	v.mu.RUnlock()
 
 	valid, err := v.checker.IsValidAPIKey(ctx, key)
+	if errors.Is(err, quota.ErrDailyQuotaExceeded) {
+		v.mu.Lock()
+		v.cache[key] = cacheEntry{valid: false, err: quota.ErrDailyQuotaExceeded, expiresAt: now.Add(quotaCacheTTL)}
+		v.mu.Unlock()
+		return false, quota.ErrDailyQuotaExceeded
+	}
 	if err != nil {
 		return false, err
 	}
@@ -82,11 +93,13 @@ func BearerMiddleware(v *Validator) func(http.Handler) http.Handler {
 
 			key := strings.TrimSpace(authHeader[len("Bearer "):])
 			ok, err := v.Validate(r.Context(), key)
-			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			if errors.Is(err, quota.ErrDailyQuotaExceeded) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"quota exceeded","detail":"daily request limit reached"}`))
 				return
 			}
-			if !ok {
+			if err != nil || !ok {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

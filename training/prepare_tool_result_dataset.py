@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import textwrap
@@ -194,6 +195,10 @@ def build_dataset(attacks_path: Path, out_train: Path, out_val: Path) -> None:
         print(f"  {label}: {count}")
     print(f"\nWrote {out_train}")
     print(f"Wrote {out_val}")
+
+    # Force-exit to prevent the HuggingFace datasets streaming background
+    # threads from hanging after we broke out of the iterator early.
+    os._exit(0)
 
 
 def main() -> None:

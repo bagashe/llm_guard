@@ -36,7 +36,6 @@ AEGIS_HOST_CATEGORIES = {
     "Criminal Planning/Confessions",
     "Malware",
     "Illegal Activity",
-    "Guns and Illegal Weapons",
     "Threat",
     "Unauthorized Advice",
     "Fraud/Deception",

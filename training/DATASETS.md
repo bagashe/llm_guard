@@ -24,6 +24,7 @@ Allowed licenses in this profile:
 | reshabhs/SPML_Chatbot_Prompt_Injection | https://huggingface.co/datasets/reshabhs/SPML_Chatbot_Prompt_Injection | MIT | allowed | 16K chatbot prompt injection rows across 840 system prompt contexts; includes severity scale. Maps to prompt_injection. |
 | JailbreakV-28K/JailBreakV-28k | https://huggingface.co/datasets/JailbreakV-28K/JailBreakV-28k | MIT | allowed | Multimodal jailbreak benchmark; text-only extraction. Filtered to Malware, Fraud, Economic Harm, Privacy Violation policy values. Maps to host_takeover_or_jailbreak and exfiltration_intent. |
 | zefang-liu/phishing-email-dataset | https://huggingface.co/datasets/zefang-liu/phishing-email-dataset | LGPL-3.0 | allowed | 18.7K phishing emails; phishing rows map to exfiltration_intent. Fills critical gap in credential/social-engineering training signal. |
+| hackaprompt/hackaprompt-dataset | https://huggingface.co/datasets/hackaprompt/hackaprompt-dataset | MIT | allowed | Real HackAPrompt competition submissions; gated by click-through only (no commercial restriction). Requires HF_TOKEN. Maps to prompt_injection. |
 
 ## Excluded from default profile
 
@@ -32,7 +33,6 @@ Allowed licenses in this profile:
 | Lakera/mosscap_prompt_injection | https://huggingface.co/datasets/Lakera/mosscap_prompt_injection | MIT | excluded | Weak-label mapping produced high false positives; removed from default mix. |
 | PKU-Alignment/BeaverTails | https://huggingface.co/datasets/PKU-Alignment/BeaverTails | CC-BY-NC-4.0 | excluded | Non-commercial restriction. |
 | allenai/wildjailbreak | https://huggingface.co/datasets/allenai/wildjailbreak | ODC-BY + gated terms | excluded | Additional responsible-use/gating obligations; not default-safe for all deployments. |
-| hackaprompt/hackaprompt-dataset | https://huggingface.co/datasets/hackaprompt/hackaprompt-dataset | MIT (gated) | excluded | Requires HuggingFace authentication to access; gated dataset. |
 
 If you change dataset selection, re-check license terms before retraining.
 

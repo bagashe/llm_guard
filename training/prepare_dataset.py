@@ -523,6 +523,33 @@ def load_jailbreakv_28k(limit: int) -> List[Dict]:
     return cap_rows(out, limit)
 
 
+def load_hackaprompt(limit: int) -> List[Dict]:
+    """hackaprompt/hackaprompt-dataset — MIT — real HackAPrompt competition submissions."""
+    seen: set = set()
+    out = []
+    for split in ("train", "test", "validation"):
+        try:
+            ds = load_dataset("hackaprompt/hackaprompt-dataset", split=split)
+        except Exception:
+            continue
+        for raw_row in ds:
+            row = dict(raw_row)
+            text = normalize_text(_safe_text(row, ["user_input", "prompt", "text", "input"]))
+            if not text or is_low_quality_text(text):
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            labels: List[str] = ["prompt_injection"]
+            if EXFIL_REGEX.search(text):
+                labels.append("exfiltration_intent")
+            out.append({"text": text, "labels": sorted(set(labels))})
+            if limit > 0 and len(out) >= limit:
+                return out
+    return out
+
+
 def load_zefang_phishing(limit: int) -> List[Dict]:
     """zefang-liu/phishing-email-dataset — LGPL-3.0 — phishing emails for exfiltration_intent coverage."""
     out = []
@@ -611,6 +638,7 @@ def main() -> None:
     parser.add_argument("--spml-limit", type=int, default=16000)
     parser.add_argument("--jailbreakv-limit", type=int, default=10000)
     parser.add_argument("--phishing-limit", type=int, default=10000)
+    parser.add_argument("--hackaprompt-limit", type=int, default=12000)
 
     parser.add_argument("--aegis-unsafe-limit", type=int, default=12000)
     parser.add_argument("--aegis-safe-limit", type=int, default=6000)
@@ -633,6 +661,7 @@ def main() -> None:
     rows.extend(with_source(load_reshabhs_spml(args.spml_limit), "reshabhs/SPML_Chatbot_Prompt_Injection"))
     rows.extend(with_source(load_jailbreakv_28k(args.jailbreakv_limit), "JailbreakV-28K/JailBreakV-28k"))
     rows.extend(with_source(load_zefang_phishing(args.phishing_limit), "zefang-liu/phishing-email-dataset"))
+    rows.extend(with_source(load_hackaprompt(args.hackaprompt_limit), "hackaprompt/hackaprompt-dataset"))
     rows.extend(with_source(bootstrap_exfiltration_rows(), "bootstrap.exfiltration"))
     rows.extend(with_source(bootstrap_host_takeover_rows(), "bootstrap.host_takeover"))
 

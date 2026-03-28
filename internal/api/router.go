@@ -37,6 +37,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	r.Get("/openapi.json", serveOpenAPISpec)
 
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Use(dep.AuthMiddleware)

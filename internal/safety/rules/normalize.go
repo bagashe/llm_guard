@@ -40,28 +40,73 @@ var confusables = strings.NewReplacer(
 //
 // The original text is preserved; decoded content is appended so both
 // the original and decoded forms are evaluated.
+//
+// ASCII fast-path: if the input is pure ASCII with no '&' or '%' characters,
+// passes 1–4 are no-ops and are skipped entirely. Only the base64 scan runs.
 func NormalizeForEvaluation(text string) string {
+	if isPlainASCII(text) {
+		// Passes 1–4 are no-ops for plain ASCII without entity/percent markers.
+		return appendBase64Decoded(text)
+	}
+
 	// Pass 1: NFKC unicode normalization
 	text = norm.NFKC.String(text)
 
 	// Pass 2: confusable homoglyph normalization
 	text = confusables.Replace(text)
 
-	// Pass 2: HTML entity decode
+	// Pass 3: HTML entity decode
 	text = html.UnescapeString(text)
 
-	// Pass 3: URL decode (best-effort, ignore errors)
+	// Pass 4: URL decode (best-effort, ignore errors)
 	if decoded, err := url.QueryUnescape(text); err == nil && decoded != text {
 		text = text + " " + decoded
 	}
 
-	// Pass 4: Decode base64 blobs and append
+	// Pass 5: Decode base64 blobs and append
 	text = appendBase64Decoded(text)
 
 	return text
 }
 
+// isPlainASCII reports whether s consists entirely of ASCII bytes and contains
+// neither '&' (HTML entity marker) nor '%' (URL-encoding marker). When true,
+// the NFKC, confusable, HTML, and URL decode passes are all no-ops.
+func isPlainASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b > 127 || b == '&' || b == '%' {
+			return false
+		}
+	}
+	return true
+}
+
+// hasBase64Candidate performs a single O(n) scan to determine whether text
+// contains a run of 20+ base64-alphabet characters. This avoids invoking the
+// full backtracking regex on inputs that cannot possibly contain a base64 blob,
+// which accounts for the vast majority of real-world messages.
+func hasBase64Candidate(s string) bool {
+	run := 0
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') ||
+			(b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=' {
+			run++
+			if run >= 20 {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
+}
+
 func appendBase64Decoded(text string) string {
+	if !hasBase64Candidate(text) {
+		return text
+	}
 	matches := base64BlobRegex.FindAllStringSubmatch(text, 20)
 	if len(matches) == 0 {
 		return text

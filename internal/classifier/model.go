@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 const (
@@ -143,6 +144,80 @@ func (m *Model) Predict(text string) []Prediction {
 	})
 
 	return out
+}
+
+// PredictWords is like Predict but accepts pre-split words, avoiding the
+// strings.Join → strings.ToLower → strings.Fields round-trip that Predict
+// requires. Lowercasing is applied per-rune via unicode.ToLower, which is
+// alloc-free. Use this when the caller already holds a []string word slice
+// (e.g. sliding-window evaluation in the classifier rule).
+func (m *Model) PredictWords(words []string) []Prediction {
+	if m.Tokenizer.Type == "" {
+		if err := m.initTokenizer(); err != nil {
+			return nil
+		}
+	}
+
+	fp := featuresPool.Get().(*map[int]float64)
+	features := *fp
+	clear(features)
+	defer featuresPool.Put(fp)
+
+	m.tokenizeWordsInto(words, features)
+
+	out := make([]Prediction, 0, len(m.Labels))
+	for _, label := range m.Labels {
+		weights := m.Weights[label]
+		logit := m.Bias[label]
+		for idx, val := range features {
+			if idx >= 0 && idx < len(weights) {
+				logit += weights[idx] * val
+			}
+		}
+		out = append(out, Prediction{Label: label, Score: sigmoid(logit)})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Score > out[j].Score
+	})
+
+	return out
+}
+
+// tokenizeWordsInto is the pre-split companion to tokenizeInto. It accepts
+// words that have already been separated by the caller and lowercases each
+// rune individually via unicode.ToLower — one int32 transform per rune, no
+// intermediate string allocation — rather than calling strings.ToLower on the
+// full text.
+func (m *Model) tokenizeWordsInto(words []string, features map[int]float64) {
+	rp := runePool.Get().(*[]rune)
+	runes := *rp
+
+	for _, word := range words {
+		runes = runes[:0]
+		runes = append(runes, ' ')
+		for _, r := range word {
+			if m.Tokenizer.Lowercase {
+				r = unicode.ToLower(r)
+			}
+			runes = append(runes, r)
+		}
+		runes = append(runes, ' ')
+
+		for n := m.Tokenizer.NgramMin; n <= m.Tokenizer.NgramMax; n++ {
+			if len(runes) < n {
+				continue
+			}
+			for i := 0; i <= len(runes)-n; i++ {
+				if idx, ok := m.Vocab[string(runes[i:i+n])]; ok {
+					features[idx]++
+				}
+			}
+		}
+	}
+
+	*rp = runes
+	runePool.Put(rp)
 }
 
 // tokenizeInto counts n-gram occurrences directly into features without

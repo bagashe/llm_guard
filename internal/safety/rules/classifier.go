@@ -82,9 +82,10 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 }
 
 // scoreWindow runs the classifier on a slice of words and returns a Match if
-// any label exceeds its threshold.
+// any label exceeds its threshold. It calls PredictWords to avoid the
+// Join → ToLower → Fields round-trip that Predict would require.
 func (r ClassifierRule) scoreWindow(words []string) (safety.Match, error) {
-	preds := r.model.Predict(strings.Join(words, " "))
+	preds := r.model.PredictWords(words)
 	var flagged []string
 	maxScore := 0.0
 	for _, pred := range preds {

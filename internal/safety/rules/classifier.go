@@ -15,9 +15,14 @@ import (
 // covers the median exfiltration sample. A 50-word stride (50% overlap) ensures
 // any contiguous 50-word span appears fully inside at least one window, so a
 // buried attack phrase cannot straddle two window boundaries undetected.
+//
+// earlyExitScore: sliding window stops as soon as a window reaches this score.
+// Sigmoid asymptotically approaches 1.0, so 0.99 represents very high confidence
+// and there is no meaningful gain from scanning further windows.
 const (
-	windowWords = 100
-	strideWords = 50
+	windowWords    = 100
+	strideWords    = 50
+	earlyExitScore = 0.99
 )
 
 type ClassifierRule struct {
@@ -73,6 +78,8 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	}
 
 	// Long messages: slide a window and return the highest-scoring result.
+	// Stop early once we reach earlyExitScore — no further windows can improve
+	// the decision and remaining work would be wasted.
 	var best safety.Match
 	for start := 0; start < len(words); start += strideWords {
 		end := start + windowWords
@@ -86,6 +93,9 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 		if m.Score > best.Score {
 			best = m
 		}
+		if best.Score >= earlyExitScore {
+			break
+		}
 	}
 	return best, nil
 }
@@ -96,8 +106,11 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 // round-trip that Predict would require.
 func (r ClassifierRule) scoreWindow(words []string) (safety.Match, error) {
 	// bestPerLabel tracks the highest score seen for each flagged label
-	// across all ensemble models.
+	// across all ensemble models. Models are scored in order; if one already
+	// reaches earlyExitScore we skip the remaining models — the decision is
+	// already safe=false at maximum confidence.
 	bestPerLabel := make(map[string]float64, 4)
+	windowMax := 0.0
 	for _, m := range r.models {
 		for _, pred := range m.PredictWords(words) {
 			threshold := m.Thresholds[pred.Label]
@@ -105,7 +118,13 @@ func (r ClassifierRule) scoreWindow(words []string) (safety.Match, error) {
 				if pred.Score > bestPerLabel[pred.Label] {
 					bestPerLabel[pred.Label] = pred.Score
 				}
+				if pred.Score > windowMax {
+					windowMax = pred.Score
+				}
 			}
+		}
+		if windowMax >= earlyExitScore {
+			break
 		}
 	}
 	if len(bestPerLabel) == 0 {

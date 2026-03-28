@@ -6,7 +6,7 @@ ARCHES := amd64 arm64
 CURRENT_OS := $(shell go env GOOS)
 CURRENT_ARCH := $(shell go env GOARCH)
 
-.PHONY: all build release clean train-prepare train-model train-word-model validate-model smoke docker-build docker-up docker-down
+.PHONY: all build release clean train-prepare train-model train-word-model train-prepare-tool-result train-tool-result-model validate-model smoke docker-build docker-up docker-down
 
 all: build
 
@@ -48,11 +48,25 @@ train-word-model:
 		--word-ngram-min 1 \
 		--word-ngram-max 2
 
+train-prepare-tool-result:
+	python3 -m uv run --project training python training/prepare_tool_result_dataset.py \
+		--attacks training/data/train.jsonl \
+		--out training/data/tool_result_train.jsonl \
+		--val-out training/data/tool_result_val.jsonl
+
+train-tool-result-model: train-prepare-tool-result
+	python3 -m uv run --project training python training/train_classifier.py \
+		--train training/data/tool_result_train.jsonl \
+		--val training/data/tool_result_val.jsonl \
+		--out models/tool_result_classifier_v1.json \
+		--metrics-out training/artifacts/tool_result_classifier_v1_metrics.json
+
 validate-model:
 	@test -f models/classifier_v1.json || (echo "missing model: models/classifier_v1.json" && exit 1)
 	@test -f models/word_classifier_v1.json || (echo "missing model: models/word_classifier_v1.json" && exit 1)
+	@test -f models/tool_result_classifier_v1.json || (echo "missing model: models/tool_result_classifier_v1.json" && exit 1)
 	@go test ./internal/classifier -run TestPredictWithTrainedModel -count=1
-	@go test ./internal/safety/rules -run "TestClassifierRuleWithTrainedModel|TestClassifierRuleToolResultIndirectInjection|TestClassifierRuleSlidingWindowCatchesEmbeddedAttack" -count=1
+	@go test ./internal/safety/rules -run "TestClassifierRuleWithTrainedModel|TestToolResultClassifierRuleIndirectInjection|TestClassifierRuleSlidingWindowCatchesEmbeddedAttack|TestToolResultClassifierRuleBenignWebContent" -count=1
 
 smoke:
 	@test -n "$(API_KEY)" || (echo "set API_KEY before running make smoke" && exit 1)

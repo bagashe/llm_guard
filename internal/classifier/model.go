@@ -105,20 +105,26 @@ func (m *Model) initTokenizer() error {
 	return nil
 }
 
+var featuresPool = sync.Pool{
+	New: func() any {
+		m := make(map[int]float64, 256)
+		return &m
+	},
+}
+
 func (m *Model) Predict(text string) []Prediction {
 	if m.Tokenizer.Type == "" {
 		if err := m.initTokenizer(); err != nil {
 			return nil
 		}
 	}
-	features := make(map[int]float64)
-	for _, token := range m.tokenize(text) {
-		idx, ok := m.Vocab[token]
-		if !ok {
-			continue
-		}
-		features[idx] += 1
-	}
+
+	fp := featuresPool.Get().(*map[int]float64)
+	features := *fp
+	clear(features)
+	defer featuresPool.Put(fp)
+
+	m.tokenizeInto(text, features)
 
 	out := make([]Prediction, 0, len(m.Labels))
 	for _, label := range m.Labels {
@@ -139,6 +145,42 @@ func (m *Model) Predict(text string) []Prediction {
 	return out
 }
 
+// tokenizeInto counts n-gram occurrences directly into features without
+// materialising intermediate strings, eliminating ~150 allocs per call.
+func (m *Model) tokenizeInto(text string, features map[int]float64) {
+	if m.Tokenizer.Lowercase {
+		text = strings.ToLower(text)
+	}
+	words := strings.Fields(text)
+
+	rp := runePool.Get().(*[]rune)
+	runes := *rp
+
+	for _, word := range words {
+		runes = runes[:0]
+		runes = append(runes, ' ')
+		for _, r := range word {
+			runes = append(runes, r)
+		}
+		runes = append(runes, ' ')
+
+		for n := m.Tokenizer.NgramMin; n <= m.Tokenizer.NgramMax; n++ {
+			if len(runes) < n {
+				continue
+			}
+			for i := 0; i <= len(runes)-n; i++ {
+				if idx, ok := m.Vocab[string(runes[i:i+n])]; ok {
+					features[idx]++
+				}
+			}
+		}
+	}
+
+	*rp = runes
+	runePool.Put(rp)
+}
+
+// tokenize materialises n-grams as a string slice. Used only by parity tests.
 func (m *Model) tokenize(text string) []string {
 	if m.Tokenizer.Lowercase {
 		text = strings.ToLower(text)

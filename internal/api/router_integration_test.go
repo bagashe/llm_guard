@@ -445,9 +445,14 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 	})
 
 	t.Run("returns safe true for allowlisted internal host", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
 		h := newTestRouter(t, testRouterOptions{internalAllowlistIPs: map[string]struct{}{"127.0.0.1": {}}})
 		body := map[string]any{
-			"message":      `{"tool":"browser.open","arguments":{"url":"http://127.0.0.1:8080/healthz"}}`,
+			"message":      `{"tool":"browser.open","arguments":{"url":"` + srv.URL + `/healthz"}}`,
 			"message_type": "tool_call",
 		}
 		rr := callEvaluate(t, h, body, "test-key")

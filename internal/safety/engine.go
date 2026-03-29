@@ -20,10 +20,6 @@ type Input struct {
 	MessageType MessageType
 	ClientIP    string
 	CountryCode string
-	// ToolName is the name of the tool that produced this message.
-	// Populated for tool_result messages; empty otherwise.
-	// Rules may use this to scope evaluation to specific tools.
-	ToolName string
 }
 
 type Reason struct {

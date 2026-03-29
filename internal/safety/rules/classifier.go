@@ -29,14 +29,11 @@ type ClassifierRule struct {
 	models       []*classifier.Model
 	allowedTypes map[safety.MessageType]struct{}
 	ruleID       string
-	toolName     string // when non-empty, skip unless in.ToolName matches
 }
 
 // newClassifierRule is the shared internal constructor. ruleID is the rule
-// identifier returned in Match.Reason.RuleID. toolName, when non-empty,
-// restricts the rule to fire only when in.ToolName matches exactly.
-// Nil models are silently dropped.
-func newClassifierRule(ruleID string, toolName string, types []safety.MessageType, models ...*classifier.Model) safety.Rule {
+// identifier returned in Match.Reason.RuleID. Nil models are silently dropped.
+func newClassifierRule(ruleID string, types []safety.MessageType, models ...*classifier.Model) safety.Rule {
 	allowed := make(map[safety.MessageType]struct{}, len(types))
 	for _, t := range types {
 		allowed[t] = struct{}{}
@@ -47,23 +44,23 @@ func newClassifierRule(ruleID string, toolName string, types []safety.MessageTyp
 			ms = append(ms, m)
 		}
 	}
-	return ClassifierRule{models: ms, allowedTypes: allowed, ruleID: ruleID, toolName: toolName}
+	return ClassifierRule{models: ms, allowedTypes: allowed, ruleID: ruleID}
 }
 
 // NewClassifierRule accepts one or more models (char n-gram, word n-gram, …)
 // and scores them as an ensemble. Nil models are silently dropped.
 // Fires on user messages only.
 func NewClassifierRule(models ...*classifier.Model) safety.Rule {
-	return newClassifierRule("classifier.malicious_intent", "",
+	return newClassifierRule("classifier.malicious_intent",
 		[]safety.MessageType{safety.MessageTypeUser}, models...)
 }
 
-// NewToolResultClassifierRule builds a classifier rule that fires only on
-// tool_result messages produced by the web_extract tool. It is trained on
-// web-page-like benign content with injected attack phrases, so it accurately
-// distinguishes indirect prompt injection from ordinary web content.
+// NewToolResultClassifierRule builds a classifier rule that fires on all
+// tool_result messages. It is trained on web-page-like benign content with
+// injected attack phrases to accurately distinguish indirect prompt injection
+// from ordinary tool output. The caller decides which tool results to evaluate.
 func NewToolResultClassifierRule(models ...*classifier.Model) safety.Rule {
-	return newClassifierRule("classifier.tool_result_injection", "web_extract",
+	return newClassifierRule("classifier.tool_result_injection",
 		[]safety.MessageType{safety.MessageTypeToolResult}, models...)
 }
 
@@ -72,7 +69,7 @@ func (r ClassifierRule) ID() string {
 }
 
 // Evaluate runs the ML classifier ensemble on messages matching the rule's
-// allowed message types (and optional tool name filter).
+// allowed message types.
 //
 // For messages longer than windowWords, a sliding window is used and the
 // maximum score across all windows is returned. This prevents benign context
@@ -82,9 +79,6 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 		return safety.Match{}, nil
 	}
 	if _, ok := r.allowedTypes[in.MessageType]; !ok {
-		return safety.Match{}, nil
-	}
-	if r.toolName != "" && in.ToolName != r.toolName {
 		return safety.Match{}, nil
 	}
 

@@ -28,7 +28,6 @@ type Dependencies struct {
 type evaluateRequest struct {
 	Message     string `json:"message"`
 	MessageType string `json:"message_type"`
-	ToolName    string `json:"tool_name,omitempty"` // optional; used with tool_result to scope per-tool rules
 }
 
 func NewRouter(dep Dependencies) http.Handler {
@@ -89,7 +88,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 	sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
 	isLocal := safety.IsPrivateOrLocalIP(sourceIP)
 
-	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP, ToolName: strings.TrimSpace(req.ToolName)}
+	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP}
 	if sourceIP != "" && !isLocal {
 		if ip := net.ParseIP(sourceIP); ip != nil {
 			code, err := dep.CountryResolver.CountryCode(ip)

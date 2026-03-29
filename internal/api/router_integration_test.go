@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"llm_guard/internal/auth"
 	"llm_guard/internal/classifier"
 	"llm_guard/internal/config"
+	"llm_guard/internal/registration"
 	"llm_guard/internal/safety"
 	"llm_guard/internal/safety/rules"
 	"llm_guard/internal/storage/sqlite"
@@ -621,4 +623,336 @@ func callEvaluateWithRemoteAddr(t *testing.T, h http.Handler, body map[string]an
 
 	h.ServeHTTP(rr, req)
 	return rr
+}
+
+// ---------------------------------------------------------------------------
+// Registration endpoint integration tests
+// ---------------------------------------------------------------------------
+
+// registrationTestEnv holds the router, key store, and challenge store
+// created by newRegistrationRouter so tests can poke internals when needed.
+type registrationTestEnv struct {
+	handler        http.Handler
+	keyStore       *sqlite.APIKeyStore
+	challengeStore *registration.ChallengeStore
+}
+
+// newRegistrationRouter builds a fully wired router with registration enabled.
+// difficulty=0 is the default; callers may override via opts.
+type registrationRouterOpts struct {
+	difficulty int
+	dailyLimit int64
+}
+
+func newRegistrationRouter(t *testing.T, opts registrationRouterOpts) registrationTestEnv {
+	t.Helper()
+
+	if opts.dailyLimit == 0 {
+		opts.dailyLimit = 1000
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "reg_test.db")
+	db, err := sqlite.OpenAndInit(dbPath)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	keyStore := sqlite.NewAPIKeyStore(db)
+	// Seed a "pre-existing" key so the evaluate endpoint is testable.
+	if err := keyStore.CreateAPIKey(t.Context(), "seed", "seed-key"); err != nil {
+		t.Fatalf("create seed key: %v", err)
+	}
+
+	validator := auth.NewValidator(keyStore)
+	engine := safety.NewEngine(true, 0.70)
+	engine.Register(rules.NewCountryBlacklistRule(map[string]struct{}{}, true))
+	engine.Register(rules.NewToolCallDomainBlacklistRule(nil))
+	engine.Register(rules.NewToolCallInternalNetworkAccessRule(nil, nil, nil))
+	engine.Register(rules.NewToolCallRedirectResolutionRule(nil, nil, nil, nil))
+	engine.Register(rules.NewToolCallCommandPolicyRule())
+	engine.Register(rules.NewToolCallSQLPolicyRule())
+	engine.Register(rules.NewClassifierRule(testClassifierModel()))
+	engine.Register(rules.NewPIIDetectionRule())
+	engine.Register(rules.NewSystemPromptLeakRule())
+	engine.Register(rules.NewSecretLeakRule())
+
+	cs := registration.NewChallengeStore(opts.difficulty)
+	t.Cleanup(cs.Stop)
+
+	cfg := config.Config{
+		FailClosed:                   false,
+		MaxBodyBytes:                 1 << 20,
+		TrustProxyHeaders:            false,
+		RiskThreshold:                0.70,
+		RegistrationEnabled:          true,
+		RegistrationDifficulty:       opts.difficulty,
+		RegistrationDefaultDailyLimit: opts.dailyLimit,
+	}
+
+	h := NewRouter(Dependencies{
+		Config:          cfg,
+		Engine:          engine,
+		AuthMiddleware:  auth.BearerMiddleware(validator),
+		CountryResolver: stubGeoResolver{code: "US"},
+		ChallengeStore:  cs,
+		KeyCreator:      keyStore,
+	})
+
+	return registrationTestEnv{handler: h, keyStore: keyStore, challengeStore: cs}
+}
+
+// postJSON fires a POST with a JSON body and returns the recorder.
+func postJSON(t *testing.T, h http.Handler, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+// postJSONFromIP fires the same request but sets RemoteAddr to control the IP.
+func postJSONFromIP(t *testing.T, h http.Handler, path string, body any, remoteAddr string) *httptest.ResponseRecorder {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = remoteAddr
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestRegisterChallengeIntegration(t *testing.T) {
+	t.Run("happy path returns 200 with correct JSON shape", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp challengeResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(resp.ChallengeID) != 32 {
+			t.Fatalf("expected 32-char challenge_id, got %d chars: %q", len(resp.ChallengeID), resp.ChallengeID)
+		}
+		if resp.Difficulty != 0 {
+			t.Fatalf("expected difficulty=0, got %d", resp.Difficulty)
+		}
+		if resp.ExpiresAt == "" {
+			t.Fatal("expires_at must not be empty")
+		}
+	})
+
+	t.Run("sixth call from same IP returns 429", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		remoteAddr := "10.0.0.1:5000"
+
+		for i := 0; i < 5; i++ {
+			rr := postJSONFromIP(t, env.handler, "/v1/register/challenge", nil, remoteAddr)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("call %d: want 200, got %d", i+1, rr.Code)
+			}
+		}
+
+		rr := postJSONFromIP(t, env.handler, "/v1/register/challenge", nil, remoteAddr)
+		if rr.Code != http.StatusTooManyRequests {
+			t.Fatalf("6th call: want 429, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("routes not mounted when registration disabled", func(t *testing.T) {
+		// newTestRouter does not set ChallengeStore/KeyCreator — routes absent.
+		h := newTestRouter(t, testRouterOptions{})
+		rr := postJSON(t, h, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 when registration disabled, got %d", rr.Code)
+		}
+	})
+}
+
+func TestRegisterSolveIntegration(t *testing.T) {
+	t.Run("missing challenge_id returns 400", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"nonce": "any",
+		})
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("missing nonce returns 400", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": "someid",
+		})
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("unknown challenge_id returns 404", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": "doesnotexist0000doesnotexist0000",
+			"nonce":        "0",
+		})
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("want 404, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("already solved challenge returns 409", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{difficulty: 0})
+
+		// Issue a challenge.
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("issue challenge: want 200, got %d", rr.Code)
+		}
+		var cr challengeResponse
+		if err := json.NewDecoder(rr.Body).Decode(&cr); err != nil {
+			t.Fatalf("decode challenge: %v", err)
+		}
+
+		// Solve it once — should succeed.
+		rr = postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": cr.ChallengeID,
+			"nonce":        "0",
+		})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("first solve: want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		// Solve it again — should conflict.
+		rr = postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": cr.ChallengeID,
+			"nonce":        "0",
+		})
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("second solve: want 409, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("invalid nonce returns 422", func(t *testing.T) {
+		// Use difficulty=4: most nonces won't satisfy it.
+		env := newRegistrationRouter(t, registrationRouterOpts{difficulty: 4})
+
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("issue challenge: want 200, got %d", rr.Code)
+		}
+		var cr challengeResponse
+		if err := json.NewDecoder(rr.Body).Decode(&cr); err != nil {
+			t.Fatalf("decode challenge: %v", err)
+		}
+
+		// "bad-nonce" is very unlikely to have 4 leading zero bits.
+		rr = postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": cr.ChallengeID,
+			"nonce":        "bad-nonce",
+		})
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("want 422, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("happy path returns api_key, name, daily_limit", func(t *testing.T) {
+		const wantDailyLimit = int64(500)
+		env := newRegistrationRouter(t, registrationRouterOpts{difficulty: 0, dailyLimit: wantDailyLimit})
+
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("issue challenge: want 200, got %d", rr.Code)
+		}
+		var cr challengeResponse
+		if err := json.NewDecoder(rr.Body).Decode(&cr); err != nil {
+			t.Fatalf("decode challenge: %v", err)
+		}
+
+		rr = postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": cr.ChallengeID,
+			"nonce":        "0", // difficulty=0: any nonce valid
+		})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("solve: want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var sr solveResponse
+		if err := json.NewDecoder(rr.Body).Decode(&sr); err != nil {
+			t.Fatalf("decode solve response: %v", err)
+		}
+		if len(sr.APIKey) != 64 {
+			t.Fatalf("api_key must be 64 hex chars, got %d: %q", len(sr.APIKey), sr.APIKey)
+		}
+		if !strings.HasPrefix(sr.Name, "agent-") {
+			t.Fatalf("expected name to start with \"agent-\", got %q", sr.Name)
+		}
+		if sr.DailyLimit != wantDailyLimit {
+			t.Fatalf("want daily_limit=%d, got %d", wantDailyLimit, sr.DailyLimit)
+		}
+	})
+}
+
+func TestRegistrationEndToEnd(t *testing.T) {
+	// Full flow: obtain challenge → solve it → use the returned key to call /v1/evaluate.
+	env := newRegistrationRouter(t, registrationRouterOpts{difficulty: 0, dailyLimit: 1000})
+
+	// Step 1: obtain challenge.
+	rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("issue challenge: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var cr challengeResponse
+	if err := json.NewDecoder(rr.Body).Decode(&cr); err != nil {
+		t.Fatalf("decode challenge: %v", err)
+	}
+
+	// Step 2: solve challenge.
+	rr = postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+		"challenge_id": cr.ChallengeID,
+		"nonce":        "0",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("solve: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var sr solveResponse
+	if err := json.NewDecoder(rr.Body).Decode(&sr); err != nil {
+		t.Fatalf("decode solve response: %v", err)
+	}
+
+	// Step 3: call /v1/evaluate with the freshly issued API key.
+	body, _ := json.Marshal(map[string]string{
+		"message":      "what is the weather today?",
+		"message_type": "user",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/evaluate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sr.APIKey)
+	rr = httptest.NewRecorder()
+	env.handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("evaluate with new key: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var res safety.Result
+	if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+		t.Fatalf("decode evaluate response: %v", err)
+	}
+	if !res.Safe {
+		t.Fatalf("expected safe=true for benign message, got reasons=%v", res.Reasons)
+	}
 }

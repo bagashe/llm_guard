@@ -17,6 +17,7 @@ import (
 	"llm_guard/internal/config"
 	"llm_guard/internal/geoip"
 	"llm_guard/internal/ratelimit"
+	"llm_guard/internal/registration"
 	"llm_guard/internal/safety"
 	"llm_guard/internal/safety/rules"
 	"llm_guard/internal/storage/sqlite"
@@ -96,12 +97,26 @@ func main() {
 	defer limiter.Stop()
 	log.Printf("rate limiter enabled rps=%.1f burst=%d", cfg.RateLimitRPS, cfg.RateLimitBurst)
 
+	var challengeStore *registration.ChallengeStore
+	var keyCreator registration.KeyCreator
+	if cfg.RegistrationEnabled {
+		challengeStore = registration.NewChallengeStore(cfg.RegistrationDifficulty)
+		defer challengeStore.Stop()
+		keyCreator = keyStore
+		log.Printf("self-registration enabled difficulty=%d daily_limit=%d",
+			cfg.RegistrationDifficulty, cfg.RegistrationDefaultDailyLimit)
+	} else {
+		log.Println("self-registration disabled")
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Config:              cfg,
 		Engine:              engine,
 		AuthMiddleware:      auth.BearerMiddleware(validator),
 		RateLimitMiddleware: limiter.Middleware,
 		CountryResolver:     countryResolver,
+		ChallengeStore:      challengeStore,
+		KeyCreator:          keyCreator,
 	})
 
 	srv := &http.Server{

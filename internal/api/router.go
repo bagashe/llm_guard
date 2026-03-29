@@ -2,7 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -14,6 +17,7 @@ import (
 
 	"llm_guard/internal/config"
 	"llm_guard/internal/geoip"
+	"llm_guard/internal/registration"
 	"llm_guard/internal/safety"
 )
 
@@ -23,6 +27,8 @@ type Dependencies struct {
 	AuthMiddleware      func(http.Handler) http.Handler
 	RateLimitMiddleware func(http.Handler) http.Handler
 	CountryResolver     geoip.Resolver
+	ChallengeStore      *registration.ChallengeStore  // nil → registration routes not mounted
+	KeyCreator          registration.KeyCreator        // nil → registration routes not mounted
 }
 
 type evaluateRequest struct {
@@ -40,12 +46,26 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Get("/openapi.json", serveOpenAPISpec)
 
 	r.Route("/v1", func(v1 chi.Router) {
-		v1.Use(dep.AuthMiddleware)
-		if dep.RateLimitMiddleware != nil {
-			v1.Use(dep.RateLimitMiddleware)
+		// Public self-registration endpoints (no auth required).
+		// Only mounted when both ChallengeStore and KeyCreator are provided.
+		if dep.ChallengeStore != nil && dep.KeyCreator != nil {
+			v1.Post("/register/challenge", func(w http.ResponseWriter, r *http.Request) {
+				handleRegisterChallenge(w, r, dep)
+			})
+			v1.Post("/register/solve", func(w http.ResponseWriter, r *http.Request) {
+				handleRegisterSolve(w, r, dep)
+			})
 		}
-		v1.Post("/evaluate", func(w http.ResponseWriter, r *http.Request) {
-			handleEvaluate(w, r, dep)
+
+		// Authenticated and rate-limited routes.
+		v1.Group(func(a chi.Router) {
+			a.Use(dep.AuthMiddleware)
+			if dep.RateLimitMiddleware != nil {
+				a.Use(dep.RateLimitMiddleware)
+			}
+			a.Post("/evaluate", func(w http.ResponseWriter, r *http.Request) {
+				handleEvaluate(w, r, dep)
+			})
 		})
 	})
 
@@ -113,6 +133,122 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 
 	res := dep.Engine.Evaluate(r.Context(), resultInput)
 	writeJSON(w, http.StatusOK, res)
+}
+
+type challengeResponse struct {
+	ChallengeID string `json:"challenge_id"`
+	Difficulty  int    `json:"difficulty"`
+	ExpiresAt   string `json:"expires_at"`
+}
+
+type solveRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	Nonce       string `json:"nonce"`
+}
+
+type solveResponse struct {
+	APIKey     string `json:"api_key"`
+	Name       string `json:"name"`
+	DailyLimit int64  `json:"daily_limit"`
+}
+
+func handleRegisterChallenge(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	clientIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+
+	c, err := dep.ChallengeStore.IssueChallenge(clientIP)
+	if err != nil {
+		if errors.Is(err, registration.ErrIPRateLimited) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "too many registration attempts",
+				"detail": "maximum 5 challenges per 10 minutes per IP",
+			})
+			return
+		}
+		log.Printf("level=error msg=\"issue challenge\" err=%v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, challengeResponse{
+		ChallengeID: c.ID,
+		Difficulty:  dep.Config.RegistrationDifficulty,
+		ExpiresAt:   c.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	body := http.MaxBytesReader(w, r.Body, dep.Config.MaxBodyBytes)
+	defer body.Close()
+
+	var req solveRequest
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.ChallengeID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "challenge_id is required"})
+		return
+	}
+	if strings.TrimSpace(req.Nonce) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "nonce is required"})
+		return
+	}
+
+	if _, err := dep.ChallengeStore.VerifySolution(req.ChallengeID, req.Nonce); err != nil {
+		switch {
+		case errors.Is(err, registration.ErrChallengeNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "challenge not found"})
+		case errors.Is(err, registration.ErrChallengeExpired):
+			writeJSON(w, http.StatusGone, map[string]string{"error": "challenge expired"})
+		case errors.Is(err, registration.ErrAlreadySolved):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "challenge already used"})
+		case errors.Is(err, registration.ErrInvalidSolution):
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid proof of work solution"})
+		default:
+			log.Printf("level=error msg=\"verify solution\" err=%v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		return
+	}
+
+	rawKey, err := registration.GenerateKey()
+	if err != nil {
+		log.Printf("level=error msg=\"generate key\" err=%v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Random 4-char suffix prevents name collision when two registrations
+	// arrive within the same second.
+	suffix, err := registration.GenerateKey()
+	if err != nil {
+		log.Printf("level=error msg=\"generate key suffix\" err=%v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	name := fmt.Sprintf("agent-%d-%s", time.Now().Unix(), suffix[:4])
+
+	ctx := context.Background()
+	if err := dep.KeyCreator.CreateAPIKey(ctx, name, rawKey); err != nil {
+		log.Printf("level=error msg=\"create api key\" err=%v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if err := dep.KeyCreator.SetDailyQuotaByName(ctx, name, dep.Config.RegistrationDefaultDailyLimit); err != nil {
+		log.Printf("level=error msg=\"set daily quota\" err=%v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Return the key exactly once. It is never logged.
+	writeJSON(w, http.StatusOK, solveResponse{
+		APIKey:     rawKey,
+		Name:       name,
+		DailyLimit: dep.Config.RegistrationDefaultDailyLimit,
+	})
 }
 
 func isValidMessageType(v string) bool {

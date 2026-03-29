@@ -12,6 +12,10 @@ type Config struct {
 	GeoIPDBPath           string
 	ClassifierPath     string
 	WordClassifierPath string
+
+	RegistrationEnabled           bool
+	RegistrationDifficulty        int
+	RegistrationDefaultDailyLimit int64
 	CountryBlacklist      map[string]struct{}
 	DomainBlacklistPath   string
 	InternalAllowlistPath string
@@ -32,6 +36,10 @@ func LoadFromEnv() Config {
 		GeoIPDBPath:           getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
 		ClassifierPath:     getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
 		WordClassifierPath: getString("WORD_CLASSIFIER_PATH", "./models/word_classifier_v1.json"),
+
+		RegistrationEnabled:           getBool("REGISTRATION_ENABLED", true),
+		RegistrationDifficulty:        getInt("REGISTRATION_DIFFICULTY", 26),
+		RegistrationDefaultDailyLimit: int64(getInt("REGISTRATION_DEFAULT_DAILY_LIMIT", 1000)),
 		CountryBlacklist:      toSetCSV(getString("COUNTRY_BLACKLIST", "")),
 		DomainBlacklistPath:   getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
 		InternalAllowlistPath: getString("INTERNAL_DESTINATION_ALLOWLIST_PATH", "./config/internal_destination_allowlist.txt"),

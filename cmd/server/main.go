@@ -86,16 +86,7 @@ func main() {
 	}
 	log.Printf("word classifier loaded path=%s labels=%d", cfg.WordClassifierPath, len(wordClf.Labels))
 	engine.Register(rules.NewClassifierRule(clf, wordClf))
-	if cfg.ToolResultClassifierPath == "" {
-		log.Fatal("tool result classifier path is required")
-	}
-	toolResultClf, err := classifier.Load(cfg.ToolResultClassifierPath)
-	if err != nil {
-		log.Fatalf("load tool result classifier path=%s: %v", cfg.ToolResultClassifierPath, err)
-	}
-	log.Printf("tool result classifier loaded path=%s labels=%d", cfg.ToolResultClassifierPath, len(toolResultClf.Labels))
-	engine.Register(rules.NewToolResultClassifierRule(toolResultClf))
-	log.Println("input rules registered: classifier.malicious_intent,classifier.tool_result_injection,input.pii_detection")
+	log.Println("input rules registered: classifier.malicious_intent,input.pii_detection")
 	engine.Register(rules.NewPIIDetectionRule())
 	engine.Register(rules.NewSystemPromptLeakRule())
 	engine.Register(rules.NewSecretLeakRule())

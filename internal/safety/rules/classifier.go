@@ -26,50 +26,28 @@ const (
 )
 
 type ClassifierRule struct {
-	models       []*classifier.Model
-	allowedTypes map[safety.MessageType]struct{}
-	ruleID       string
-}
-
-// newClassifierRule is the shared internal constructor. ruleID is the rule
-// identifier returned in Match.Reason.RuleID. Nil models are silently dropped.
-func newClassifierRule(ruleID string, types []safety.MessageType, models ...*classifier.Model) safety.Rule {
-	allowed := make(map[safety.MessageType]struct{}, len(types))
-	for _, t := range types {
-		allowed[t] = struct{}{}
-	}
-	ms := make([]*classifier.Model, 0, len(models))
-	for _, m := range models {
-		if m != nil {
-			ms = append(ms, m)
-		}
-	}
-	return ClassifierRule{models: ms, allowedTypes: allowed, ruleID: ruleID}
+	models []*classifier.Model
 }
 
 // NewClassifierRule accepts one or more models (char n-gram, word n-gram, …)
 // and scores them as an ensemble. Nil models are silently dropped.
 // Fires on user messages only.
 func NewClassifierRule(models ...*classifier.Model) safety.Rule {
-	return newClassifierRule("classifier.malicious_intent",
-		[]safety.MessageType{safety.MessageTypeUser}, models...)
-}
-
-// NewToolResultClassifierRule builds a classifier rule that fires on all
-// tool_result messages. It is trained on web-page-like benign content with
-// injected attack phrases to accurately distinguish indirect prompt injection
-// from ordinary tool output. The caller decides which tool results to evaluate.
-func NewToolResultClassifierRule(models ...*classifier.Model) safety.Rule {
-	return newClassifierRule("classifier.tool_result_injection",
-		[]safety.MessageType{safety.MessageTypeToolResult}, models...)
+	ms := make([]*classifier.Model, 0, len(models))
+	for _, m := range models {
+		if m != nil {
+			ms = append(ms, m)
+		}
+	}
+	return ClassifierRule{models: ms}
 }
 
 func (r ClassifierRule) ID() string {
-	return r.ruleID
+	return "classifier.malicious_intent"
 }
 
-// Evaluate runs the ML classifier ensemble on messages matching the rule's
-// allowed message types.
+// Evaluate runs the ML classifier ensemble on user messages.
+// system, assistant, tool_call, and tool_result messages are skipped.
 //
 // For messages longer than windowWords, a sliding window is used and the
 // maximum score across all windows is returned. This prevents benign context
@@ -78,7 +56,7 @@ func (r ClassifierRule) Evaluate(_ context.Context, in safety.Input) (safety.Mat
 	if len(r.models) == 0 {
 		return safety.Match{}, nil
 	}
-	if _, ok := r.allowedTypes[in.MessageType]; !ok {
+	if in.MessageType != safety.MessageTypeUser {
 		return safety.Match{}, nil
 	}
 
@@ -163,7 +141,7 @@ func (r ClassifierRule) scoreWindow(words []string) (safety.Match, error) {
 		Matched: true,
 		Score:   maxScore,
 		Reason: safety.Reason{
-			RuleID:   r.ruleID,
+			RuleID:   "classifier.malicious_intent",
 			Severity: "high",
 			Detail:   "classifier flagged labels: " + strings.Join(flagged, ","),
 		},

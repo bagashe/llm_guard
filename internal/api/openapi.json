@@ -3,7 +3,7 @@
   "info": {
     "title": "llm_guard Safety Evaluation API",
     "version": "1.0.0",
-    "description": "Evaluates LLM messages for safety violations including prompt injection, PII, secret leakage, dangerous tool calls, and malicious intent. Integrate as a guard rail before forwarding messages to an LLM or returning LLM output to users."
+    "description": "Evaluates LLM messages for safety violations including prompt injection, PII, secret leakage, dangerous tool calls, and malicious intent. Integrate as a guard rail before forwarding messages to an LLM, returning LLM output to users, or executing tool calls on behalf of an agent.\n\n## Privacy & Logging\n\nThis service is designed for agent-to-agent use and does not log message content. Each request produces one structured audit log entry containing only:\n\n| Field | Contents |\n|---|---|\n| `method`, `path`, `status`, `duration_ms` | HTTP request metadata |\n| `remote_addr` | **Client IP address** (see note below) |\n| `message_type` | Message category only — not content |\n| `tool_name` | Tool name only — not arguments or payloads |\n| `safe`, `risk_score`, `reason_ids` | Safety evaluation outcome |\n\nMessage content, tool arguments, and API keys are never written to logs.\n\n**IP addresses are logged on every request** for security auditing and rate-limit enforcement. If your deployment has data-residency or privacy requirements around IP logging, place this service behind a proxy that strips or anonymises the source IP before it reaches the application.\n\nTool arguments (`tool_args`) are included in logs only when the server is started with `DEBUG=true`. Do not enable debug mode in production."
   },
   "servers": [{"url": "/"}],
   "security": [{"bearerAuth": []}],

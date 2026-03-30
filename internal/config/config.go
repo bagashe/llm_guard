@@ -21,6 +21,7 @@ type Config struct {
 	InternalAllowlistPath string
 	InitialAPIKeys        []string
 	TrustProxyHeaders     bool
+	Debug                 bool
 	FailClosed            bool
 	RiskThreshold         float64
 	MaxBodyBytes          int64
@@ -45,6 +46,7 @@ func LoadFromEnv() Config {
 		InternalAllowlistPath: getString("INTERNAL_DESTINATION_ALLOWLIST_PATH", "./config/internal_destination_allowlist.txt"),
 		InitialAPIKeys:        toListCSV(getString("INITIAL_API_KEYS", "")),
 		TrustProxyHeaders:     getBool("TRUST_PROXY_HEADERS", true),
+		Debug:                 getBool("DEBUG", false),
 		FailClosed:            getBool("FAIL_CLOSED", true),
 		RiskThreshold:         getFloat("RISK_THRESHOLD", 0.70),
 		MaxBodyBytes:          maxBody,

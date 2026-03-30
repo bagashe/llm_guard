@@ -202,6 +202,22 @@ curl -X POST http://localhost:8080/v1/evaluate \
 }
 ```
 
+## Logging and privacy
+
+The service never logs message content, tool arguments, or API keys. Each request produces one structured log line containing only operational and safety-outcome metadata:
+
+| Field | What it contains |
+|-------|-----------------|
+| `method`, `path`, `status`, `duration_ms` | HTTP request metadata |
+| `remote_addr` | **Client IP address** — logged for security auditing and rate-limit enforcement |
+| `message_type` | Category only (`user`, `system`, `tool_call`, `assistant`) — not content |
+| `tool_name` | Tool name only — not arguments or payloads |
+| `safe`, `risk_score`, `reason_ids` | Safety evaluation outcome |
+
+**Client IP addresses are logged on every request.** If your deployment has data-residency or privacy requirements around IP logging, place this service behind a proxy that strips or anonymises the IP before it reaches the application, or disable `TRUST_PROXY_HEADERS` to prevent forwarded IPs from being recorded.
+
+`tool_args` is only included when `DEBUG=true`. Do not enable debug mode in production.
+
 ## Extending safeguards
 
 Add new rule implementations under `internal/safety/rules` by implementing `safety.Rule` and registering in `cmd/server/main.go`.

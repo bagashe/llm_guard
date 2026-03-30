@@ -38,7 +38,7 @@ type evaluateRequest struct {
 
 func NewRouter(dep Dependencies) http.Handler {
 	r := chi.NewRouter()
-	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders))
+	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders, dep.Config.Debug))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -342,7 +342,7 @@ func (r *statusRecorder) setAuditToolCallDetails(message string) {
 	r.toolArgs = args
 }
 
-func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Handler {
+func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -359,26 +359,43 @@ func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Ha
 				messageTypeField = rec.messageType
 			}
 			toolNameField := "na"
-			toolArgsField := "na"
 			if rec.toolName != "" {
 				toolNameField = rec.toolName
 			}
-			if rec.toolArgs != "" {
-				toolArgsField = rec.toolArgs
+			// Audit log: never include message content, tool arguments, or API keys outside debug mode.
+			// Note: client IP (remote_addr) is always logged for security auditing and rate-limit enforcement.
+			if debug {
+				toolArgsField := "na"
+				if rec.toolArgs != "" {
+					toolArgsField = rec.toolArgs
+				}
+				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
+					r.Method,
+					r.URL.Path,
+					rec.status,
+					time.Since(start).Milliseconds(),
+					clientIP,
+					messageTypeField,
+					toolNameField,
+					toolArgsField,
+					safeField,
+					riskScoreField,
+					reasonIDsField,
+				)
+			} else {
+				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q safe=%s risk_score=%s reason_ids=%s",
+					r.Method,
+					r.URL.Path,
+					rec.status,
+					time.Since(start).Milliseconds(),
+					clientIP,
+					messageTypeField,
+					toolNameField,
+					safeField,
+					riskScoreField,
+					reasonIDsField,
+				)
 			}
-			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
-				r.Method,
-				r.URL.Path,
-				rec.status,
-				time.Since(start).Milliseconds(),
-				clientIP,
-				messageTypeField,
-				toolNameField,
-				toolArgsField,
-				safeField,
-				riskScoreField,
-				reasonIDsField,
-			)
 		})
 	}
 }

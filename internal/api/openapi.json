@@ -3,7 +3,7 @@
   "info": {
     "title": "llm_guard Safety Evaluation API",
     "version": "1.0.0",
-    "description": "Evaluates LLM messages for safety violations including prompt injection, PII, secret leakage, dangerous tool calls, and malicious intent. Integrate as a guard rail before forwarding messages to an LLM or returning LLM output to users."
+    "description": "Evaluates LLM messages for safety violations including prompt injection, PII, secret leakage, dangerous tool calls, and malicious intent. Integrate as a guard rail before forwarding messages to an LLM, returning LLM output to users, or executing tool calls on behalf of an agent.\n\n## Integration pattern\n\n**Bootstrap:** Agents without an API key must self-register before calling `/v1/evaluate`. Complete the proof-of-work flow: `POST /v1/register/challenge` to obtain a challenge, solve it, then `POST /v1/register/solve` to receive your API key. The key is returned once — store it securely.\n\n**Agent loop call points:**\n\n1. **User input received** → `message_type=user` — screens for prompt injection, malicious intent, and PII before the LLM sees it.\n2. **LLM emits a tool call** → `message_type=tool_call` — screens for dangerous commands, blacklisted domains, and SQL injection before execution.\n3. **Tool returns a result** → `message_type=tool_result` — screens for secret/credential leakage before the result is passed back to the LLM.\n4. **LLM produces output** → `message_type=assistant` — screens for system prompt leakage and exposed secrets before returning to the caller.\n\n`system` messages are pass-through — no rules apply, skip evaluation.\n\n**On `safe=false`:** halt the pipeline at that step. Do not forward the message.\n\n**Note:** `input.pii_detection` fires at low severity and will appear in `reasons` without flipping `safe` to `false`. Handle it according to your own data policy.\n\n## Privacy & Logging\n\nThis service is designed for agent-to-agent use and does not log message content. Each request produces one structured audit log entry containing only:\n\n| Field | Contents |\n|---|---|\n| `method`, `path`, `status`, `duration_ms` | HTTP request metadata |\n| `remote_addr` | **Client IP address** (see note below) |\n| `message_type` | Message category only — not content |\n| `tool_name` | Tool name only — not arguments or payloads |\n| `safe`, `risk_score`, `reason_ids` | Safety evaluation outcome |\n\nMessage content, tool arguments, and API keys are never written to logs.\n\n**IP addresses are logged on every request** for security auditing and rate-limit enforcement. If your deployment has data-residency or privacy requirements around IP logging, place this service behind a proxy that strips or anonymises the source IP before it reaches the application.\n\nTool arguments (`tool_args`) are included in logs only when the server is started with `DEBUG=true`. Do not enable debug mode in production."
   },
   "servers": [{"url": "/"}],
   "security": [{"bearerAuth": []}],
@@ -110,6 +110,10 @@
                 "toolCall": {
                   "summary": "Tool call payload",
                   "value": {"message": "{\"tool\":\"bash\",\"arguments\":{\"command\":\"rm -rf /\"}}", "message_type": "tool_call"}
+                },
+                "toolResult": {
+                  "summary": "Tool result content",
+                  "value": {"message": "AKIA1234567890ABCDEF\nsecret_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "message_type": "tool_result"}
                 }
               }
             }

@@ -2,7 +2,6 @@ dist/
 tmp/
 storage/*.db
 storage/*.mmdb
-geoip/*.mmdb
 training/.venv/
 training/__pycache__/
 .env

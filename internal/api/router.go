@@ -115,7 +115,7 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 			code, err := dep.CountryResolver.CountryCode(ip)
 			if err != nil {
 				if dep.Config.FailClosed {
-					writeJSON(w, http.StatusOK, safety.Result{
+					writeJSON(w, http.StatusForbidden, safety.Result{
 						Safe:      false,
 						RiskScore: 1.0,
 						Reasons: []safety.Reason{{
@@ -133,6 +133,10 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 	}
 
 	res := dep.Engine.Evaluate(r.Context(), resultInput)
+	if res.IsCountryBlocked() {
+		writeJSON(w, http.StatusForbidden, res)
+		return
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 

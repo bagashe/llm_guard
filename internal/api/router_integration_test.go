@@ -155,8 +155,8 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 		}
 		rr := callEvaluate(t, h, body, "test-key")
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusForbidden)
 		}
 
 		var res safety.Result
@@ -179,8 +179,8 @@ func TestEvaluateEndpointIntegration(t *testing.T) {
 		}
 		rr := callEvaluate(t, h, body, "test-key")
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusOK)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status mismatch: got %d want %d", rr.Code, http.StatusForbidden)
 		}
 
 		var res safety.Result

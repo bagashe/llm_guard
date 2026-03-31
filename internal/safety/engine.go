@@ -120,6 +120,16 @@ func (e *Engine) Evaluate(ctx context.Context, in Input) Result {
 	return result
 }
 
+// IsCountryBlocked reports whether the result was terminated by a country block.
+func (r Result) IsCountryBlocked() bool {
+	for _, reason := range r.Reasons {
+		if isTerminalCountryBlock(reason.RuleID) {
+			return true
+		}
+	}
+	return false
+}
+
 func isTerminalCountryBlock(ruleID string) bool {
 	return ruleID == "country_blacklist.blocked_country" || ruleID == "country_blacklist.unknown_country"
 }

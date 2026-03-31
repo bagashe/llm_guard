@@ -69,7 +69,7 @@
 <body>
 
   <h1>yapguard</h1>
-  <p class="tagline">Safety evaluation API for LLM agents. Self-hostable. Privacy-first.</p>
+  <p class="tagline">Privacy-first, safety evaluation API for LLM agents.</p>
 
   <p>
     A lightweight guard rail you drop in front of any LLM pipeline.
@@ -84,8 +84,7 @@
     <li>Dangerous tool calls — shell commands, SQL injection, blacklisted domains, internal network access</li>
     <li>Redirect chains that resolve to internal destinations</li>
     <li>System prompt leakage in assistant output</li>
-    <li>Secrets and credentials in tool results and LLM output</li>
-    <li>Country-based blocking via GeoIP (configurable)</li>
+   <li>Secrets and credentials in tool results and LLM output</li>
   </ul>
 
   <h2>API</h2>
@@ -97,7 +96,7 @@
   </table>
   <p style="margin-top:0.75rem"><a href="/openapi.json">Full OpenAPI spec →</a></p>
 
-  <h2>Integrate with Claude Code</h2>
+  <h2>Integrate using Claude Code</h2>
   <p>Point a coding agent at the spec and it will wire up the guard automatically. Example prompt:</p>
   <pre><span class="comment"># paste into Claude Code</span>
 
@@ -135,13 +134,12 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
     Tool arguments and API keys are never written to logs.
     Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
     The service does not phone home, collect telemetry, or store request data beyond the SQLite
-    key/quota store you control.
+    key/quota store.
   </div>
 
   <hr>
   <p style="font-size:0.78rem; color:#444;">
     <a href="/openapi.json">openapi.json</a> &nbsp;·&nbsp;
-    <a href="https://github.com/bagashe/llm_guard">source</a>
   </p>
 
 </body>

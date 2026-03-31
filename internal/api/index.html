@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>yapguard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      background: #0d0d0d;
+      color: #d4d4d4;
+      line-height: 1.7;
+      padding: 4rem 2rem;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 { color: #fff; font-size: 1.4rem; font-weight: 600; margin-bottom: 0.25rem; }
+    h2 { color: #aaa; font-size: 0.8rem; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; margin: 2.5rem 0 0.75rem; }
+
+    p { color: #999; font-size: 0.9rem; margin-bottom: 0.5rem; }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 0.5rem;
+    }
+    ul li { color: #999; font-size: 0.9rem; padding-left: 1.2rem; position: relative; }
+    ul li::before { content: "—"; position: absolute; left: 0; color: #444; }
+
+    a { color: #7eb8f7; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .tagline { color: #666; font-size: 0.85rem; margin-bottom: 2.5rem; }
+
+    pre {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      padding: 1.25rem 1.5rem;
+      font-size: 0.8rem;
+      color: #c8c8c8;
+      overflow-x: auto;
+      margin: 0.75rem 0 1rem;
+      white-space: pre;
+    }
+
+    .comment { color: #555; }
+    .label { color: #888; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.25rem; display: block; }
+
+    .privacy-note {
+      margin-top: 2.5rem;
+      padding: 1rem 1.25rem;
+      border-left: 2px solid #2a2a2a;
+      color: #666;
+      font-size: 0.82rem;
+    }
+    .privacy-note strong { color: #999; }
+
+    .endpoints { font-size: 0.85rem; }
+    .endpoints td { padding: 0.2rem 1rem 0.2rem 0; color: #888; vertical-align: top; }
+    .endpoints td:first-child { color: #7eb8f7; white-space: nowrap; }
+
+    hr { border: none; border-top: 1px solid #1e1e1e; margin: 2.5rem 0; }
+  </style>
+</head>
+<body>
+
+  <h1>yapguard</h1>
+  <p class="tagline">Safety evaluation API for LLM agents. Self-hostable. Privacy-first.</p>
+
+  <p>
+    A lightweight guard rail you drop in front of any LLM pipeline.
+    Evaluates messages before they reach the model and before output reaches users,
+    blocking prompt injection, PII leakage, credential exposure, dangerous tool calls, and more.
+  </p>
+
+  <h2>What it checks</h2>
+  <ul>
+    <li>Prompt injection &amp; malicious intent (ML classifier)</li>
+    <li>PII in user input — email, SSN, credit card, phone</li>
+    <li>Dangerous tool calls — shell commands, SQL injection, blacklisted domains, internal network access</li>
+    <li>Redirect chains that resolve to internal destinations</li>
+    <li>System prompt leakage in assistant output</li>
+    <li>Secrets and credentials in tool results and LLM output</li>
+    <li>Country-based blocking via GeoIP (configurable)</li>
+  </ul>
+
+  <h2>API</h2>
+  <table class="endpoints">
+    <tr><td>POST /v1/evaluate</td><td>Evaluate a message. Returns <code>safe</code>, <code>risk_score</code>, <code>reasons</code>.</td></tr>
+    <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge.</td></tr>
+    <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
+    <tr><td>GET /healthz</td><td>Health check.</td></tr>
+  </table>
+  <p style="margin-top:0.75rem"><a href="/openapi.json">Full OpenAPI spec →</a></p>
+
+  <h2>Integrate with Claude Code</h2>
+  <p>Point a coding agent at the spec and it will wire up the guard automatically. Example prompt:</p>
+  <pre><span class="comment"># paste into Claude Code</span>
+
+Fetch https://yapguard.com/openapi.json and integrate yapguard into
+this codebase as a safety guard rail. Register for an API key using
+the proof-of-work flow, store it in .env as YAPGUARD_API_KEY, then
+wrap every LLM call so that:
+  1. user input is evaluated before being sent to the model
+  2. tool calls are evaluated before execution
+  3. tool results and assistant output are evaluated before returning
+     to the caller
+Halt the pipeline and surface the reasons array if safe=false.</pre>
+
+  <h2>Self-registration</h2>
+  <p>
+    No account, no email. Agents register autonomously via proof-of-work
+    (SHA-256, difficulty 26). The API key is returned exactly once — store it.
+  </p>
+
+  <pre><span class="comment"># 1. get a challenge</span>
+curl -s -X POST https://yapguard.com/v1/register/challenge \
+  -H "Content-Type: application/json" | jq .
+
+<span class="comment"># 2. solve SHA256(challenge_id + ":" + nonce) with leading zero bits,
+#    then submit</span>
+curl -s -X POST https://yapguard.com/v1/register/solve \
+  -H "Content-Type: application/json" \
+  -d '{"challenge_id":"&lt;id&gt;","nonce":"&lt;nonce&gt;"}' | jq .</pre>
+
+  <div class="privacy-note">
+    <strong>Privacy.</strong>
+    Message content is never logged. Each request produces one structured log line containing
+    only HTTP metadata, message category, tool name, and the safety outcome
+    (<code>safe</code>, <code>risk_score</code>, <code>reason_ids</code>).
+    Tool arguments and API keys are never written to logs.
+    Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
+    The service does not phone home, collect telemetry, or store request data beyond the SQLite
+    key/quota store you control.
+  </div>
+
+  <hr>
+  <p style="font-size:0.78rem; color:#444;">
+    <a href="/openapi.json">openapi.json</a> &nbsp;·&nbsp;
+    <a href="https://github.com/bagashe/llm_guard">source</a>
+  </p>
+
+</body>
+</html>

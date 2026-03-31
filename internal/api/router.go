@@ -47,6 +47,8 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Get("/openapi.json", serveOpenAPISpec)
 
 	r.Route("/v1", func(v1 chi.Router) {
+		v1.Use(countryBlockMiddleware(dep))
+
 		// Public self-registration endpoints (no auth required).
 		// Only mounted when both ChallengeStore and KeyCreator are provided.
 		if dep.ChallengeStore != nil && dep.KeyCreator != nil {
@@ -107,30 +109,9 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 	}
 
 	sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
-	isLocal := safety.IsPrivateOrLocalIP(sourceIP)
+	countryCode, _ := r.Context().Value(countryCodeKey{}).(string)
 
-	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP}
-	if sourceIP != "" && !isLocal {
-		if ip := net.ParseIP(sourceIP); ip != nil {
-			code, err := dep.CountryResolver.CountryCode(ip)
-			if err != nil {
-				if dep.Config.FailClosed {
-					writeJSON(w, http.StatusForbidden, safety.Result{
-						Safe:      false,
-						RiskScore: 1.0,
-						Reasons: []safety.Reason{{
-							RuleID:   "geoip.lookup_failed",
-							Severity: "high",
-							Detail:   "failed to resolve country from client ip",
-						}},
-					})
-					return
-				}
-			} else {
-				resultInput.CountryCode = code
-			}
-		}
-	}
+	resultInput := safety.Input{Message: req.Message, MessageType: safety.MessageType(req.MessageType), ClientIP: sourceIP, CountryCode: countryCode}
 
 	res := dep.Engine.Evaluate(r.Context(), resultInput)
 	if res.IsCountryBlocked() {
@@ -535,4 +516,56 @@ func auditFieldsFromResponse(path string, status int, body []byte) (string, stri
 
 func floatToAuditString(v float64) string {
 	return strconv.FormatFloat(v, 'f', 4, 64)
+}
+
+type countryCodeKey struct{}
+
+// countryBlockMiddleware resolves the client country and rejects requests from
+// blacklisted countries with 403 before they reach any /v1 handler.
+func countryBlockMiddleware(dep Dependencies) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
+			if sourceIP == "" || safety.IsPrivateOrLocalIP(sourceIP) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ip := net.ParseIP(sourceIP)
+			if ip == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			code, err := dep.CountryResolver.CountryCode(ip)
+			if err != nil {
+				writeJSON(w, http.StatusForbidden, safety.Result{
+					Safe:      false,
+					RiskScore: 1.0,
+					Reasons: []safety.Reason{{
+						RuleID:   "geoip.lookup_failed",
+						Severity: "high",
+						Detail:   "failed to resolve country from client ip",
+					}},
+				})
+				return
+			}
+
+			if _, blocked := dep.Config.CountryBlacklist[code]; blocked {
+				writeJSON(w, http.StatusForbidden, safety.Result{
+					Safe:      false,
+					RiskScore: 1.0,
+					Reasons: []safety.Reason{{
+						RuleID:   "country_blacklist.blocked_country",
+						Severity: "high",
+						Detail:   "request country is blacklisted",
+					}},
+				})
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), countryCodeKey{}, code)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

@@ -640,8 +640,11 @@ type registrationTestEnv struct {
 // newRegistrationRouter builds a fully wired router with registration enabled.
 // difficulty=0 is the default; callers may override via opts.
 type registrationRouterOpts struct {
-	difficulty int
-	dailyLimit int64
+	difficulty       int
+	dailyLimit       int64
+	countryBlacklist map[string]struct{}
+	geoCode          string
+	geoErr           error
 }
 
 func newRegistrationRouter(t *testing.T, opts registrationRouterOpts) registrationTestEnv {
@@ -649,6 +652,9 @@ func newRegistrationRouter(t *testing.T, opts registrationRouterOpts) registrati
 
 	if opts.dailyLimit == 0 {
 		opts.dailyLimit = 1000
+	}
+	if opts.geoCode == "" && opts.geoErr == nil {
+		opts.geoCode = "DE"
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "reg_test.db")
@@ -680,21 +686,27 @@ func newRegistrationRouter(t *testing.T, opts registrationRouterOpts) registrati
 	cs := registration.NewChallengeStore(opts.difficulty)
 	t.Cleanup(cs.Stop)
 
+	countryBlacklist := opts.countryBlacklist
+	if countryBlacklist == nil {
+		countryBlacklist = map[string]struct{}{}
+	}
+
 	cfg := config.Config{
-		FailClosed:                   false,
-		MaxBodyBytes:                 1 << 20,
-		TrustProxyHeaders:            false,
-		RiskThreshold:                0.70,
-		RegistrationEnabled:          true,
-		RegistrationDifficulty:       opts.difficulty,
+		FailClosed:                    false,
+		MaxBodyBytes:                  1 << 20,
+		TrustProxyHeaders:             false,
+		RiskThreshold:                 0.70,
+		RegistrationEnabled:           true,
+		RegistrationDifficulty:        opts.difficulty,
 		RegistrationDefaultDailyLimit: opts.dailyLimit,
+		CountryBlacklist:              countryBlacklist,
 	}
 
 	h := NewRouter(Dependencies{
 		Config:          cfg,
 		Engine:          engine,
 		AuthMiddleware:  auth.BearerMiddleware(validator),
-		CountryResolver: stubGeoResolver{code: "US"},
+		CountryResolver: stubGeoResolver{code: opts.geoCode, err: opts.geoErr},
 		ChallengeStore:  cs,
 		KeyCreator:      keyStore,
 	})
@@ -778,6 +790,26 @@ func TestRegisterChallengeIntegration(t *testing.T) {
 		rr := postJSON(t, h, "/v1/register/challenge", nil)
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("expected 404 when registration disabled, got %d", rr.Code)
+		}
+	})
+
+	t.Run("blocked for blacklisted country", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{
+			countryBlacklist: map[string]struct{}{"DE": {}},
+		})
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("want 403, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("blocked when geoip lookup fails", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{
+			geoErr: errors.New("db unavailable"),
+		})
+		rr := postJSON(t, env.handler, "/v1/register/challenge", nil)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("want 403, got %d: %s", rr.Code, rr.Body.String())
 		}
 	})
 }
@@ -902,6 +934,19 @@ func TestRegisterSolveIntegration(t *testing.T) {
 		}
 		if sr.DailyLimit != wantDailyLimit {
 			t.Fatalf("want daily_limit=%d, got %d", wantDailyLimit, sr.DailyLimit)
+		}
+	})
+
+	t.Run("blocked for blacklisted country", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{
+			countryBlacklist: map[string]struct{}{"DE": {}},
+		})
+		rr := postJSON(t, env.handler, "/v1/register/solve", map[string]string{
+			"challenge_id": "anyid",
+			"nonce":        "0",
+		})
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("want 403, got %d: %s", rr.Code, rr.Body.String())
 		}
 	})
 }

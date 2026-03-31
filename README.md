@@ -80,6 +80,44 @@ docker compose exec llm_guard apikeyctl revoke -db /app/storage/llm_guard.db -na
 
 Set `DEBUG=true` only for local troubleshooting. Normal mode logs request metadata (`message_type`, `tool_name`) but omits verbose fields; debug mode adds `tool_args` and detailed safety audit fields.
 
+### Deploy with Kamal
+
+Kamal deployment config is included at `config/deploy.yml`.
+
+1. Install Kamal and Docker on your deploy machine and target host.
+2. Update `config/deploy.yml`:
+   - replace `servers.web` with your host(s)
+   - set the `image` name to your registry/repo
+   - adjust env values and quotas as needed
+3. Configure secrets:
+
+```bash
+cp .kamal/secrets.example .kamal/secrets
+```
+
+Then export required values before deploy:
+
+```bash
+export KAMAL_REGISTRY_USERNAME=<registry-user>
+export KAMAL_REGISTRY_PASSWORD=<registry-password-or-token>
+export COUNTRY_BLACKLIST=KP,IR
+```
+
+Optional bootstrap keys (comma-separated):
+
+```bash
+export INITIAL_API_KEYS=
+```
+
+4. Deploy:
+
+```bash
+kamal setup
+kamal deploy
+```
+
+Persistent state is mounted at `/app/storage` via `llm_guard_storage`, so SQLite data and `GeoLite2-Country.mmdb` survive container replacements.
+
 ### GeoLite2 database setup (required for country lookup)
 
 This service uses MaxMind GeoLite2 Country data (`.mmdb`) for IP-to-country mapping.

@@ -6,3 +6,4 @@ training/.venv/
 training/__pycache__/
 .env
 *.test
+.kamal/secrets

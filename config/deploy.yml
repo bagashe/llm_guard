@@ -32,7 +32,7 @@ env:
     DOMAIN_BLACKLIST_PATH: /app/config/domain_blacklist.txt
     INTERNAL_DESTINATION_ALLOWLIST_PATH: /app/config/internal_destination_allowlist.txt
     GEOIP_DB_PATH: /app/geoip/GeoLite2-Country.mmdb
-    COUNTRY_BLACKLIST: KP,IR,SY,CU,RU,BY
+    COUNTRY_BLACKLIST: KP,IR,SY,CU,RU,BY,CN
     FAIL_CLOSED: "true"
     TRUST_PROXY_HEADERS: "true"
     RATE_LIMIT_RPS: "10"

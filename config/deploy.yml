@@ -3,7 +3,7 @@ image: ghcr.io/bagashe/llm_guard
 
 servers:
   web:
-    - 203.0.113.10
+    - 54.148.112.4
 
 proxy:
   app_port: 8080

@@ -7,51 +7,51 @@ import (
 )
 
 type Config struct {
-	ListenAddr            string
-	DatabasePath          string
-	GeoIPDBPath           string
+	ListenAddr         string
+	DatabasePath       string
+	GeoIPDBPath        string
 	ClassifierPath     string
 	WordClassifierPath string
 
 	RegistrationEnabled           bool
 	RegistrationDifficulty        int
 	RegistrationDefaultDailyLimit int64
-	CountryBlacklist      map[string]struct{}
-	DomainBlacklistPath   string
-	InternalAllowlistPath string
-	InitialAPIKeys        []string
-	TrustProxyHeaders     bool
-	Debug                 bool
-	FailClosed            bool
-	RiskThreshold         float64
-	MaxBodyBytes          int64
-	RateLimitRPS          float64
-	RateLimitBurst        int
+	CountryBlacklist              map[string]struct{}
+	DomainBlacklistPath           string
+	InternalAllowlistPath         string
+	InitialAPIKeys                []string
+	TrustProxyHeaders             bool
+	FailClosed                    bool
+	RiskThreshold                 float64
+	MaxBodyBytes                  int64
+	RateLimitRPS                  float64
+	RateLimitBurst                int
+	Debug                         bool
 }
 
 func LoadFromEnv() Config {
 	maxBody := int64(getInt("MAX_BODY_BYTES", 1<<20))
 	return Config{
-		ListenAddr:            getString("LISTEN_ADDR", ":8080"),
-		DatabasePath:          getString("DATABASE_PATH", "./storage/llm_guard.db"),
-		GeoIPDBPath:           getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
+		ListenAddr:         getString("LISTEN_ADDR", ":8080"),
+		DatabasePath:       getString("DATABASE_PATH", "./storage/llm_guard.db"),
+		GeoIPDBPath:        getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
 		ClassifierPath:     getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
 		WordClassifierPath: getString("WORD_CLASSIFIER_PATH", "./models/word_classifier_v1.json"),
 
 		RegistrationEnabled:           getBool("REGISTRATION_ENABLED", true),
 		RegistrationDifficulty:        getInt("REGISTRATION_DIFFICULTY", 26),
 		RegistrationDefaultDailyLimit: int64(getInt("REGISTRATION_DEFAULT_DAILY_LIMIT", 1000)),
-		CountryBlacklist:      toSetCSV(getString("COUNTRY_BLACKLIST", "")),
-		DomainBlacklistPath:   getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
-		InternalAllowlistPath: getString("INTERNAL_DESTINATION_ALLOWLIST_PATH", "./config/internal_destination_allowlist.txt"),
-		InitialAPIKeys:        toListCSV(getString("INITIAL_API_KEYS", "")),
-		TrustProxyHeaders:     getBool("TRUST_PROXY_HEADERS", true),
-		Debug:                 getBool("DEBUG", false),
-		FailClosed:            getBool("FAIL_CLOSED", true),
-		RiskThreshold:         getFloat("RISK_THRESHOLD", 0.70),
-		MaxBodyBytes:          maxBody,
-		RateLimitRPS:          getFloat("RATE_LIMIT_RPS", 10),
-		RateLimitBurst:        getInt("RATE_LIMIT_BURST", 20),
+		CountryBlacklist:              toSetCSV(getString("COUNTRY_BLACKLIST", "")),
+		DomainBlacklistPath:           getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),
+		InternalAllowlistPath:         getString("INTERNAL_DESTINATION_ALLOWLIST_PATH", "./config/internal_destination_allowlist.txt"),
+		InitialAPIKeys:                toListCSV(getString("INITIAL_API_KEYS", "")),
+		TrustProxyHeaders:             getBool("TRUST_PROXY_HEADERS", true),
+		FailClosed:                    getBool("FAIL_CLOSED", true),
+		RiskThreshold:                 getFloat("RISK_THRESHOLD", 0.70),
+		MaxBodyBytes:                  maxBody,
+		RateLimitRPS:                  getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst:                getInt("RATE_LIMIT_BURST", 20),
+		Debug:                         getBool("DEBUG", false),
 	}
 }
 

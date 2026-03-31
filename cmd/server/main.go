@@ -27,6 +27,14 @@ func main() {
 	_ = godotenv.Load()
 
 	cfg := config.LoadFromEnv()
+	if cfg.Debug {
+		log.Println("WARNING: DEBUG=true enables verbose request audit logging (tool_args and safety fields); disable in production")
+	}
+	debugf := func(format string, args ...any) {
+		if cfg.Debug {
+			log.Printf(format, args...)
+		}
+	}
 
 	db, err := sqlite.OpenAndInit(cfg.DatabasePath)
 	if err != nil {
@@ -55,7 +63,7 @@ func main() {
 
 	engine := safety.NewEngine(cfg.FailClosed, cfg.RiskThreshold)
 	engine.Register(rules.NewCountryBlacklistRule(cfg.CountryBlacklist, cfg.FailClosed))
-	log.Println("geo rules registered: country_blacklist.blocked_country,country_blacklist.unknown_country")
+	debugf("geo rules registered: country_blacklist.blocked_country,country_blacklist.unknown_country")
 	domainBlacklist, err := config.LoadDomainBlacklist(cfg.DomainBlacklistPath)
 	if err != nil {
 		log.Fatalf("load domain blacklist path=%s: %v", cfg.DomainBlacklistPath, err)
@@ -69,7 +77,7 @@ func main() {
 	engine.Register(rules.NewToolCallRedirectResolutionRule(domainBlacklist, internalAllowlist.Domains, internalAllowlist.IPs, internalAllowlist.CIDRs))
 	engine.Register(rules.NewToolCallCommandPolicyRule())
 	engine.Register(rules.NewToolCallSQLPolicyRule())
-	log.Printf("tool-call rules registered: tool_call.domain_blacklist,tool_call.internal_network_access,tool_call.redirect_resolution,tool_call.command_policy,tool_call.sql_policy domains=%d internal_allowlist_domains=%d internal_allowlist_ips=%d internal_allowlist_cidrs=%d", len(domainBlacklist), len(internalAllowlist.Domains), len(internalAllowlist.IPs), len(internalAllowlist.CIDRs))
+	debugf("tool-call rules registered: tool_call.domain_blacklist,tool_call.internal_network_access,tool_call.redirect_resolution,tool_call.command_policy,tool_call.sql_policy domains=%d internal_allowlist_domains=%d internal_allowlist_ips=%d internal_allowlist_cidrs=%d", len(domainBlacklist), len(internalAllowlist.Domains), len(internalAllowlist.IPs), len(internalAllowlist.CIDRs))
 	if cfg.ClassifierPath == "" {
 		log.Fatal("classifier path is required")
 	}
@@ -77,7 +85,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load classifier path=%s: %v", cfg.ClassifierPath, err)
 	}
-	log.Printf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
+	debugf("classifier loaded path=%s labels=%d", cfg.ClassifierPath, len(clf.Labels))
 	if cfg.WordClassifierPath == "" {
 		log.Fatal("word classifier path is required")
 	}
@@ -85,17 +93,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("load word classifier path=%s: %v", cfg.WordClassifierPath, err)
 	}
-	log.Printf("word classifier loaded path=%s labels=%d", cfg.WordClassifierPath, len(wordClf.Labels))
+	debugf("word classifier loaded path=%s labels=%d", cfg.WordClassifierPath, len(wordClf.Labels))
 	engine.Register(rules.NewClassifierRule(clf, wordClf))
-	log.Println("input rules registered: classifier.malicious_intent,input.pii_detection")
+	debugf("input rules registered: classifier.malicious_intent,input.pii_detection")
 	engine.Register(rules.NewPIIDetectionRule())
 	engine.Register(rules.NewSystemPromptLeakRule())
 	engine.Register(rules.NewSecretLeakRule())
-	log.Println("output rules registered: output.system_prompt_leak,output.secret_leak")
+	debugf("output rules registered: output.system_prompt_leak,output.secret_leak")
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	defer limiter.Stop()
-	log.Printf("rate limiter enabled rps=%.1f burst=%d", cfg.RateLimitRPS, cfg.RateLimitBurst)
+	debugf("rate limiter enabled rps=%.1f burst=%d", cfg.RateLimitRPS, cfg.RateLimitBurst)
 
 	var challengeStore *registration.ChallengeStore
 	var keyCreator registration.KeyCreator
@@ -103,10 +111,8 @@ func main() {
 		challengeStore = registration.NewChallengeStore(cfg.RegistrationDifficulty)
 		defer challengeStore.Stop()
 		keyCreator = keyStore
-		log.Printf("self-registration enabled difficulty=%d daily_limit=%d",
+		debugf("self-registration enabled difficulty=%d daily_limit=%d",
 			cfg.RegistrationDifficulty, cfg.RegistrationDefaultDailyLimit)
-	} else {
-		log.Println("self-registration disabled")
 	}
 
 	router := api.NewRouter(api.Dependencies{
@@ -129,7 +135,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("listening on %s", cfg.ListenAddr)
+		debugf("listening on %s", cfg.ListenAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

@@ -27,8 +27,8 @@ type Dependencies struct {
 	AuthMiddleware      func(http.Handler) http.Handler
 	RateLimitMiddleware func(http.Handler) http.Handler
 	CountryResolver     geoip.Resolver
-	ChallengeStore      *registration.ChallengeStore  // nil → registration routes not mounted
-	KeyCreator          registration.KeyCreator        // nil → registration routes not mounted
+	ChallengeStore      *registration.ChallengeStore // nil → registration routes not mounted
+	KeyCreator          registration.KeyCreator      // nil → registration routes not mounted
 }
 
 type evaluateRequest struct {
@@ -167,7 +167,9 @@ func handleRegisterChallenge(w http.ResponseWriter, r *http.Request, dep Depende
 			})
 			return
 		}
-		log.Printf("level=error msg=\"issue challenge\" err=%v", err)
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"issue challenge\" err=%v", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -208,7 +210,9 @@ func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencie
 		case errors.Is(err, registration.ErrInvalidSolution):
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid proof of work solution"})
 		default:
-			log.Printf("level=error msg=\"verify solution\" err=%v", err)
+			if dep.Config.Debug {
+				log.Printf("level=error msg=\"verify solution\" err=%v", err)
+			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		}
 		return
@@ -216,7 +220,9 @@ func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencie
 
 	rawKey, err := registration.GenerateKey()
 	if err != nil {
-		log.Printf("level=error msg=\"generate key\" err=%v", err)
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"generate key\" err=%v", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -225,7 +231,9 @@ func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencie
 	// arrive within the same second.
 	suffix, err := registration.GenerateKey()
 	if err != nil {
-		log.Printf("level=error msg=\"generate key suffix\" err=%v", err)
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"generate key suffix\" err=%v", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -233,12 +241,16 @@ func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencie
 
 	ctx := context.Background()
 	if err := dep.KeyCreator.CreateAPIKey(ctx, name, rawKey); err != nil {
-		log.Printf("level=error msg=\"create api key\" err=%v", err)
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"create api key\" err=%v", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 	if err := dep.KeyCreator.SetDailyQuotaByName(ctx, name, dep.Config.RegistrationDefaultDailyLimit); err != nil {
-		log.Printf("level=error msg=\"set daily quota\" err=%v", err)
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"set daily quota\" err=%v", err)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -353,7 +365,6 @@ func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Hand
 				clientIP = r.RemoteAddr
 			}
 
-			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
 			messageTypeField := "na"
 			if rec.messageType != "" {
 				messageTypeField = rec.messageType
@@ -362,14 +373,9 @@ func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Hand
 			if rec.toolName != "" {
 				toolNameField = rec.toolName
 			}
-			// Audit log: never include message content, tool arguments, or API keys outside debug mode.
-			// Note: client IP (remote_addr) is always logged for security auditing and rate-limit enforcement.
-			if debug {
-				toolArgsField := "na"
-				if rec.toolArgs != "" {
-					toolArgsField = rec.toolArgs
-				}
-				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
+
+			if !debug {
+				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q",
 					r.Method,
 					r.URL.Path,
 					rec.status,
@@ -377,25 +383,28 @@ func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Hand
 					clientIP,
 					messageTypeField,
 					toolNameField,
-					toolArgsField,
-					safeField,
-					riskScoreField,
-					reasonIDsField,
 				)
-			} else {
-				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q safe=%s risk_score=%s reason_ids=%s",
-					r.Method,
-					r.URL.Path,
-					rec.status,
-					time.Since(start).Milliseconds(),
-					clientIP,
-					messageTypeField,
-					toolNameField,
-					safeField,
-					riskScoreField,
-					reasonIDsField,
-				)
+				return
 			}
+
+			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
+			toolArgsField := "na"
+			if rec.toolArgs != "" {
+				toolArgsField = rec.toolArgs
+			}
+			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
+				r.Method,
+				r.URL.Path,
+				rec.status,
+				time.Since(start).Milliseconds(),
+				clientIP,
+				messageTypeField,
+				toolNameField,
+				toolArgsField,
+				safeField,
+				riskScoreField,
+				reasonIDsField,
+			)
 		})
 	}
 }

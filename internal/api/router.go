@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -38,7 +39,7 @@ type evaluateRequest struct {
 
 func NewRouter(dep Dependencies) http.Handler {
 	r := chi.NewRouter()
-	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders, dep.Config.Debug))
+	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders))
 
 	r.Get("/", serveIndex)
 	r.Get("/llms.txt", serveLLMsTXT)
@@ -341,10 +342,23 @@ func (r *statusRecorder) setAuditToolCallDetails(message string) {
 	r.toolArgs = args
 }
 
-func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Handler) http.Handler {
+type countingReader struct {
+	io.ReadCloser
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			cr := &countingReader{ReadCloser: r.Body}
+			r.Body = cr
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 			clientIP := extractClientIP(r, trustProxyHeaders)
@@ -361,25 +375,8 @@ func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Hand
 				toolNameField = rec.toolName
 			}
 
-			if !debug {
-				log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q",
-					r.Method,
-					r.URL.Path,
-					rec.status,
-					time.Since(start).Milliseconds(),
-					clientIP,
-					messageTypeField,
-					toolNameField,
-				)
-				return
-			}
-
 			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
-			toolArgsField := "na"
-			if rec.toolArgs != "" {
-				toolArgsField = rec.toolArgs
-			}
-			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q tool_args=%q safe=%s risk_score=%s reason_ids=%s",
+			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q input_bytes=%d safe=%s risk_score=%s reason_ids=%s",
 				r.Method,
 				r.URL.Path,
 				rec.status,
@@ -387,7 +384,7 @@ func requestLoggingMiddleware(trustProxyHeaders bool, debug bool) func(http.Hand
 				clientIP,
 				messageTypeField,
 				toolNameField,
-				toolArgsField,
+				cr.n,
 				safeField,
 				riskScoreField,
 				reasonIDsField,

@@ -135,6 +135,9 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
     Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
     The service does not phone home, collect telemetry, or store request data beyond the SQLite
     key/quota store.
+Sample log lines:
+<pre>level=info method=POST path=/v1/messages status=200 duration_ms=23 remote_addr=203.0.113.42 message_type=assistant tool_name="bash" input_bytes=1024 safe=true risk_score=0.00 reason_ids=[]
+level=info method=POST path=/v1/messages status=400 duration_ms=18 remote_addr=203.0.113.42 message_type=user tool_name="na" input_bytes=312 safe=false risk_score=0.94 reason_ids=[prompt_injection,credential_exposure]</pre>
   </div>
 
   <hr>

@@ -39,7 +39,7 @@ func LoadFromEnv() Config {
 		WordClassifierPath: getString("WORD_CLASSIFIER_PATH", "./models/word_classifier_v1.json"),
 
 		RegistrationEnabled:           getBool("REGISTRATION_ENABLED", true),
-		RegistrationDifficulty:        getInt("REGISTRATION_DIFFICULTY", 26),
+		RegistrationDifficulty:        getInt("REGISTRATION_DIFFICULTY", 25),
 		RegistrationDefaultDailyLimit: int64(getInt("REGISTRATION_DEFAULT_DAILY_LIMIT", 1000)),
 		CountryBlacklist:              toSetCSV(getString("COUNTRY_BLACKLIST", "")),
 		DomainBlacklistPath:           getString("DOMAIN_BLACKLIST_PATH", "./config/domain_blacklist.txt"),

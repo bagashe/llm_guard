@@ -9,7 +9,7 @@
 //     caller may create and return an API key.
 //
 // The expected number of SHA256 operations to find a valid nonce is 2^difficulty.
-// At difficulty=26 (~67M hashes), a typical cloud VM takes roughly 5–10 seconds.
+// At difficulty=25 (~34M hashes), a typical cloud VM takes roughly 2–5 seconds.
 package registration
 
 import (
@@ -39,7 +39,7 @@ var (
 )
 
 const (
-	challengeTTL       = 5 * time.Minute
+	challengeTTL       = 10 * time.Minute
 	ipWindowDuration   = 10 * time.Minute
 	ipMaxChallenges    = 5
 	maxNonceLen        = 256 // bytes; caps hash-a-giant-input abuse

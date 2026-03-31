@@ -27,10 +27,10 @@
         "operationId": "issueRegistrationChallenge",
         "summary": "Request a proof-of-work challenge",
         "security": [],
-        "description": "Issues a short-lived challenge for self-registration. The client must find a nonce that satisfies the proof-of-work condition before calling /v1/register/solve.\n\n**Algorithm**\n\nFind any string `nonce` such that:\n\n```\nSHA256(challenge_id + \":\" + nonce)\n```\n\nhas `difficulty` leading zero bits in its binary representation.\n\n**Reference solver (Python)**\n\n```python\nimport hashlib, struct\n\ndef solve(challenge_id: str, difficulty: int) -> str:\n    target_bytes, rem = divmod(difficulty, 8)\n    n = 0\n    while True:\n        nonce = str(n)\n        h = hashlib.sha256(f\"{challenge_id}:{nonce}\".encode()).digest()\n        ok = all(b == 0 for b in h[:target_bytes])\n        if ok and rem > 0:\n            ok = (h[target_bytes] >> (8 - rem)) == 0\n        if ok:\n            return nonce\n        n += 1\n```\n\n**Difficulty and expected time**\n\n| difficulty | expected hashes | typical cloud VM (~10M/s) |\n|---|---|---|\n| 20 | ~1M | ~0.1 s |\n| 24 | ~16M | ~1.6 s |\n| 26 | ~67M | ~6.7 s |\n| 28 | ~268M | ~27 s |\n\nCheck the `difficulty` field in the response — it is authoritative.\n\n**Rate limit**: 5 challenge requests per IP per 10 minutes.",
+        "description": "Issues a short-lived challenge for self-registration. The client must find a nonce that satisfies the proof-of-work condition before calling /v1/register/solve.\n\n**Algorithm**\n\nFind any string `nonce` such that:\n\n```\nSHA256(challenge_id + \":\" + nonce)\n```\n\nhas `difficulty` leading zero bits in its binary representation.\n\n**Reference solver (Python)**\n\n```python\nimport hashlib, struct\n\ndef solve(challenge_id: str, difficulty: int) -> str:\n    target_bytes, rem = divmod(difficulty, 8)\n    n = 0\n    while True:\n        nonce = str(n)\n        h = hashlib.sha256(f\"{challenge_id}:{nonce}\".encode()).digest()\n        ok = all(b == 0 for b in h[:target_bytes])\n        if ok and rem > 0:\n            ok = (h[target_bytes] >> (8 - rem)) == 0\n        if ok:\n            return nonce\n        n += 1\n```\n\n**Difficulty and expected time**\n\n| difficulty | expected hashes | typical cloud VM (~10M/s) |\n|---|---|---|\n| 20 | ~1M | ~0.1 s |\n| 24 | ~16M | ~1.6 s |\n| 25 | ~34M | ~3.4 s |\n| 28 | ~268M | ~27 s |\n\nCheck the `difficulty` field in the response — it is authoritative.\n\n**Rate limit**: 5 challenge requests per IP per 10 minutes.",
         "responses": {
           "200": {
-            "description": "Challenge issued. Solve it and submit to /v1/register/solve within 5 minutes.",
+            "description": "Challenge issued. Solve it and submit to /v1/register/solve within 10 minutes.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChallengeResponse"}}}
           },
           "429": {
@@ -45,7 +45,7 @@
         "operationId": "solveRegistrationChallenge",
         "summary": "Submit a proof-of-work solution and obtain an API key",
         "security": [],
-        "description": "Verifies that `SHA256(challenge_id + \":\" + nonce)` has the required number of leading zero bits. On success, creates a new API key and returns it **once** — store it securely, it will not be shown again.\n\nEach challenge may only be solved once (409 on a second attempt). Challenges expire after 5 minutes (410).",
+        "description": "Verifies that `SHA256(challenge_id + \":\" + nonce)` has the required number of leading zero bits. On success, creates a new API key and returns it **once** — store it securely, it will not be shown again.\n\nEach challenge may only be solved once (409 on a second attempt). Challenges expire after 10 minutes (410).",
         "requestBody": {
           "required": true,
           "content": {
@@ -78,7 +78,7 @@
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
           },
           "410": {
-            "description": "Challenge has expired (TTL is 5 minutes). Request a new one.",
+            "description": "Challenge has expired (TTL is 10 minutes). Request a new one.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
           },
           "422": {
@@ -161,12 +161,12 @@
           "difficulty": {
             "type": "integer",
             "description": "Number of leading zero bits required in SHA256(challenge_id + ':' + nonce). Expected hashes = 2^difficulty.",
-            "example": 26
+            "example": 25
           },
           "expires_at": {
             "type": "string",
             "format": "date-time",
-            "description": "RFC3339 UTC timestamp after which this challenge is invalid. Default TTL is 5 minutes.",
+            "description": "RFC3339 UTC timestamp after which this challenge is invalid. Default TTL is 10 minutes.",
             "example": "2026-03-29T12:05:00Z"
           }
         }

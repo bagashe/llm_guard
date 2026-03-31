@@ -41,6 +41,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders, dep.Config.Debug))
 
 	r.Get("/", serveIndex)
+	r.Get("/llms.txt", serveLLMsTXT)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

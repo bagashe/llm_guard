@@ -1,0 +1,23 @@
+# yapguard
+
+> Safety evaluation API for LLM agents. Screens messages for prompt injection, PII, credential leakage, dangerous tool calls, and malicious intent before they reach a model or user.
+
+## Docs
+
+- [OpenAPI spec](/openapi.json): Full API reference — endpoints, request/response schemas, authentication
+
+## Integration
+
+Agents without an API key must self-register via proof-of-work before calling /v1/evaluate:
+
+1. POST /v1/register/challenge — receive a challenge_id and difficulty
+2. Solve: find nonce where SHA256(challenge_id + ":" + nonce) has `difficulty` leading zero bits
+3. POST /v1/register/solve — submit solution, receive API key (returned once, store it)
+
+Then call POST /v1/evaluate with Bearer auth on every message in the agent loop:
+- user input before sending to the LLM
+- tool calls before execution
+- tool results before passing back to the LLM
+- assistant output before returning to the caller
+
+Halt the pipeline if safe=false.

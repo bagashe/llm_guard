@@ -34,7 +34,7 @@ func LoadFromEnv() Config {
 	return Config{
 		ListenAddr:         getString("LISTEN_ADDR", ":8080"),
 		DatabasePath:       getString("DATABASE_PATH", "./storage/llm_guard.db"),
-		GeoIPDBPath:        getString("GEOIP_DB_PATH", "./storage/GeoLite2-Country.mmdb"),
+		GeoIPDBPath:        getString("GEOIP_DB_PATH", "./geoip/GeoLite2-Country.mmdb"),
 		ClassifierPath:     getString("CLASSIFIER_PATH", "./models/classifier_v1.json"),
 		WordClassifierPath: getString("WORD_CLASSIFIER_PATH", "./models/word_classifier_v1.json"),
 

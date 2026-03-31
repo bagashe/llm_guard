@@ -20,6 +20,7 @@ COPY --from=builder /out/server /usr/local/bin/server
 COPY --from=builder /out/apikeyctl /usr/local/bin/apikeyctl
 COPY models ./models
 COPY config ./config
+COPY geoip ./geoip
 RUN mkdir -p /app/storage && chown -R app:app /app
 
 USER app
@@ -31,7 +32,7 @@ ENV LISTEN_ADDR=:8080 \
     CLASSIFIER_PATH=/app/models/classifier_v1.json \
     DOMAIN_BLACKLIST_PATH=/app/config/domain_blacklist.txt \
     INTERNAL_DESTINATION_ALLOWLIST_PATH=/app/config/internal_destination_allowlist.txt \
-    GEOIP_DB_PATH=/app/storage/GeoLite2-Country.mmdb \
+    GEOIP_DB_PATH=/app/geoip/GeoLite2-Country.mmdb \
     FAIL_CLOSED=true \
     TRUST_PROXY_HEADERS=true
 

@@ -11,7 +11,7 @@ services:
       DATABASE_PATH: "${DATABASE_PATH:-/app/storage/llm_guard.db}"
       INITIAL_API_KEYS: "${INITIAL_API_KEYS:-}"
       CLASSIFIER_PATH: "${CLASSIFIER_PATH:-/app/models/classifier_v1.json}"
-      GEOIP_DB_PATH: "${GEOIP_DB_PATH:-/app/storage/GeoLite2-Country.mmdb}"
+      GEOIP_DB_PATH: "${GEOIP_DB_PATH:-/app/geoip/GeoLite2-Country.mmdb}"
       COUNTRY_BLACKLIST: "${COUNTRY_BLACKLIST:-}"
       FAIL_CLOSED: "${FAIL_CLOSED:-true}"
       TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-true}"

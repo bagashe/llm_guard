@@ -116,7 +116,7 @@ kamal setup
 kamal deploy
 ```
 
-Persistent state is mounted at `/app/storage` via `llm_guard_storage`, so SQLite data and `GeoLite2-Country.mmdb` survive container replacements.
+Persistent state is mounted at `/app/storage` via `llm_guard_storage`, so SQLite data survives container replacements. GeoIP data is shipped in the image at `/app/geoip/GeoLite2-Country.mmdb`.
 
 ### GeoLite2 database setup (required for country lookup)
 
@@ -127,11 +127,11 @@ This service uses MaxMind GeoLite2 Country data (`.mmdb`) for IP-to-country mapp
 2. Place the file at:
 
 ```bash
-mkdir -p storage
-mv /path/to/GeoLite2-Country.mmdb ./storage/GeoLite2-Country.mmdb
+mkdir -p geoip
+mv /path/to/GeoLite2-Country.mmdb ./geoip/GeoLite2-Country.mmdb
 ```
 
-With Docker Compose bind mounts, this host path is available in the container as `/app/storage/GeoLite2-Country.mmdb`.
+The Docker image bakes this file into `/app/geoip/GeoLite2-Country.mmdb` during build.
 
 If you do not want GeoIP lookups, set `GEOIP_DB_PATH` to an empty value before starting the server.
 
@@ -152,7 +152,7 @@ export INITIAL_API_KEYS=
 export COUNTRY_BLACKLIST=KP,IR
 export DOMAIN_BLACKLIST_PATH=./config/domain_blacklist.txt
 export INTERNAL_DESTINATION_ALLOWLIST_PATH=./config/internal_destination_allowlist.txt
-export GEOIP_DB_PATH=./storage/GeoLite2-Country.mmdb
+export GEOIP_DB_PATH=./geoip/GeoLite2-Country.mmdb
 export CLASSIFIER_PATH=./models/classifier_v1.json
 export FAIL_CLOSED=true
 export TRUST_PROXY_HEADERS=true

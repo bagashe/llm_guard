@@ -100,7 +100,7 @@ Then export required values before deploy:
 ```bash
 export KAMAL_REGISTRY_USERNAME=<registry-user>
 export KAMAL_REGISTRY_PASSWORD=<registry-password-or-token>
-export COUNTRY_BLACKLIST=KP,IR
+export COUNTRY_BLACKLIST=KP,IR,SY,CU,RU,BY
 ```
 
 Optional bootstrap keys (comma-separated):
@@ -149,7 +149,7 @@ You are responsible for complying with MaxMind's GeoLite2 license terms when dow
 export LISTEN_ADDR=:8080
 export DATABASE_PATH=./storage/llm_guard.db
 export INITIAL_API_KEYS=
-export COUNTRY_BLACKLIST=KP,IR
+export COUNTRY_BLACKLIST=KP,IR,SY,CU,RU,BY
 export DOMAIN_BLACKLIST_PATH=./config/domain_blacklist.txt
 export INTERNAL_DESTINATION_ALLOWLIST_PATH=./config/internal_destination_allowlist.txt
 export GEOIP_DB_PATH=./geoip/GeoLite2-Country.mmdb

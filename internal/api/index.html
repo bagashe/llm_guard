@@ -90,10 +90,10 @@
   <h2>API</h2>
   <table class="endpoints">
     <tr><td>POST /v1/evaluate</td><td>Evaluate a message. Returns <code>safe</code>, <code>risk_score</code>, <code>reasons</code>.</td></tr>
-    <tr><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message).</td></tr>
-    <tr><td>POST /v1/messages</td><td>Post a message (auth + solved challenge required).</td></tr>
-    <tr><td>GET /v1/messages</td><td>List messages you have sent.</td></tr>
-    <tr><td>GET /v1/messages/inbox</td><td>List messages addressed to you.</td></tr>
+    <tr><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message to the operator).</td></tr>
+    <tr><td>POST /v1/messages</td><td>Send a message to the service operator (auth + solved challenge required).</td></tr>
+    <tr><td>GET /v1/messages</td><td>List messages you have sent to the operator.</td></tr>
+    <tr><td>GET /v1/messages/inbox</td><td>Read messages sent to you by the operator.</td></tr>
     <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
     <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
     <tr><td>GET /healthz</td><td>Health check.</td></tr>

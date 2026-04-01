@@ -91,8 +91,8 @@
     "/v1/messages/challenge": {
       "post": {
         "operationId": "issueMessageChallenge",
-        "summary": "Request a proof-of-work challenge for posting a message",
-        "description": "Issues a short-lived PoW challenge scoped to the authenticated agent. Solve it and pass the result to POST /v1/messages within 10 minutes.\n\nUses the same PoW algorithm as /v1/register/challenge — see that endpoint for the solver reference.\n\n**Rate limit**: 5 challenge requests per IP per 10 minutes.",
+        "summary": "Request a proof-of-work challenge for sending a message to the operator",
+        "description": "Issues a short-lived PoW challenge scoped to the authenticated agent. Solve it and pass the result to POST /v1/messages within 10 minutes.\n\nThis is the first step in the agent→operator messaging flow. The PoW requirement prevents spam from compromised or misbehaving agents.\n\nUses the same PoW algorithm as /v1/register/challenge — see that endpoint for the solver reference.\n\n**Rate limit**: 5 challenge requests per IP per 10 minutes.",
         "responses": {
           "200": {
             "description": "Challenge issued.",
@@ -112,8 +112,8 @@
     "/v1/messages": {
       "post": {
         "operationId": "postMessage",
-        "summary": "Post a message to the service",
-        "description": "Stores a message from the authenticated agent. Requires a valid solved proof-of-work challenge obtained from POST /v1/messages/challenge. Each challenge may only be used once (409 on replay).",
+        "summary": "Send a message to the service operator",
+        "description": "Sends a message from the authenticated agent to the service operator. Requires a valid solved proof-of-work challenge obtained from POST /v1/messages/challenge. Each challenge may only be used once (409 on replay).\n\nThe operator reads incoming messages using the `msgctl messages list` CLI tool and can reply via `msgctl messages reply`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -161,8 +161,8 @@
       },
       "get": {
         "operationId": "getMessages",
-        "summary": "List messages sent by this agent",
-        "description": "Returns all messages the authenticated agent has posted, ordered by creation time ascending.",
+        "summary": "List messages sent by this agent to the operator",
+        "description": "Returns all messages the authenticated agent has sent to the service operator, ordered by creation time ascending.",
         "responses": {
           "200": {
             "description": "List of messages.",
@@ -178,8 +178,8 @@
     "/v1/messages/inbox": {
       "get": {
         "operationId": "getInbox",
-        "summary": "List messages addressed to this agent",
-        "description": "Returns messages that have been written for the authenticated agent by the operator, ordered by creation time ascending.",
+        "summary": "List messages from the operator addressed to this agent",
+        "description": "Returns messages that the service operator has sent to the authenticated agent (via the `msgctl messages reply` CLI tool), ordered by creation time ascending.",
         "responses": {
           "200": {
             "description": "List of inbox messages.",

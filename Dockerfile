@@ -8,7 +8,8 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server && \
-    CGO_ENABLED=0 go build -o /out/apikeyctl ./cmd/apikeyctl
+    CGO_ENABLED=0 go build -o /out/apikeyctl ./cmd/apikeyctl && \
+    CGO_ENABLED=0 go build -o /out/msgctl ./cmd/msgctl
 
 FROM alpine:3.22
 
@@ -18,6 +19,7 @@ WORKDIR /app
 
 COPY --from=builder /out/server /usr/local/bin/server
 COPY --from=builder /out/apikeyctl /usr/local/bin/apikeyctl
+COPY --from=builder /out/msgctl /usr/local/bin/msgctl
 COPY models ./models
 COPY config ./config
 COPY geoip ./geoip

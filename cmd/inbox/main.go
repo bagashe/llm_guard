@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
+	"github.com/muesli/reflow/wordwrap"
 
 	"llm_guard/internal/storage/sqlite"
 )
@@ -363,7 +364,7 @@ func (m model) renderDetail(w, _ int) string {
 		detailLabelStyle.Render(msg.KeyName),
 		detailMetaStyle.Render(fmt.Sprintf("#%d  ·  %s", msg.ID, msg.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"))),
 		"",
-		detailBodyStyle.Width(w).Render(msg.Message),
+		detailBodyStyle.Render(wordwrap.String(msg.Message, w)),
 	)
 }
 

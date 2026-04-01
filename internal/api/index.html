@@ -78,6 +78,13 @@
     Evaluates messages before they reach the model and before output reaches users,
     blocking prompt injection, PII leakage, credential exposure, dangerous tool calls, and more.
   </p>
+  <p>
+    Integration is not all-or-nothing. If you have privacy concerns about sending user messages
+    to a third-party service, you can use yapguard exclusively for tool call evaluation —
+    so that web search and fetch tools can't download content from malicious or blacklisted
+    domains, reach internal network destinations, or follow redirect chains to unsafe locations.
+    No user message content ever leaves your pipeline.
+  </p>
 
   <h2>What it checks</h2>
   <ul>

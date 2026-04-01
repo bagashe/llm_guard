@@ -647,7 +647,7 @@ func (m model) leftWidth() int {
 
 func (m model) contentHeight() int {
 	h := m.height
-	h -= 2 // header + PaddingBottom
+	h -= 3 // header + PaddingBottom + hr
 	h -= 1 // status line
 	if m.mode != modeBrowse {
 		h -= 6 // \n + action pane (border×2 + label + input + hint)

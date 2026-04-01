@@ -320,6 +320,7 @@ func (m model) View() string {
 	header := fmt.Sprintf("INBOX  ·  %d message(s)  ·  refreshed %s  ·  next in %ds  ·  [r] refresh  [q] quit",
 		len(m.messages), refreshStr, countdown)
 	b.WriteString(headerStyle.Render(header))
+	b.WriteString("\n")
 	b.WriteString(hrStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteString("\n")
 

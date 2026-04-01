@@ -505,6 +505,7 @@ func (m model) View() string {
 		activeCount, len(m.keys), refreshStr, countdown,
 	)
 	b.WriteString(headerStyle.Render(header))
+	b.WriteString("\n")
 	b.WriteString(hrStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteString("\n")
 

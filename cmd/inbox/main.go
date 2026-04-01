@@ -1,0 +1,361 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/joho/godotenv"
+
+	"llm_guard/internal/storage/sqlite"
+)
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+var (
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#5fdfb0")).
+			PaddingBottom(1)
+
+	replyBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#5fdfb0")).
+				Padding(0, 1)
+
+	hintStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#444444"))
+
+	statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666"))
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff5555"))
+)
+
+// ---------------------------------------------------------------------------
+// List item
+// ---------------------------------------------------------------------------
+
+type msgItem struct {
+	msg sqlite.AgentMessageWithKeyName
+}
+
+func (i msgItem) Title() string {
+	return i.msg.KeyName
+}
+
+func (i msgItem) Description() string {
+	ts := i.msg.CreatedAt.UTC().Format("2006-01-02 15:04")
+	return fmt.Sprintf("%s  %s", ts, i.msg.Message)
+}
+
+func (i msgItem) FilterValue() string {
+	return i.msg.KeyName + " " + i.msg.Message
+}
+
+// ---------------------------------------------------------------------------
+// tea.Msg types
+// ---------------------------------------------------------------------------
+
+type tickMsg time.Time
+type refreshedMsg []sqlite.AgentMessageWithKeyName
+type refreshErrMsg error
+type replySentMsg struct{}
+type replyErrMsg error
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
+type model struct {
+	list      list.Model
+	messages  []sqlite.AgentMessageWithKeyName
+	replying  bool
+	selected  *sqlite.AgentMessageWithKeyName
+	textarea  textarea.Model
+	store     *sqlite.APIKeyStore
+	statusMsg string
+	lastRefresh time.Time
+	width     int
+	height    int
+	err       error
+}
+
+func newModel(store *sqlite.APIKeyStore) model {
+	// List
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = true
+	l := list.New(nil, delegate, 0, 0)
+	l.Title = ""
+	l.SetShowTitle(false)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+
+	// Textarea
+	ta := textarea.New()
+	ta.Placeholder = "Type your reply..."
+	ta.CharLimit = 512
+	ta.SetWidth(60)
+	ta.SetHeight(2)
+	ta.ShowLineNumbers = false
+
+	return model{
+		list:     l,
+		textarea: ta,
+		store:    store,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(
+		fetchMessages(m.store),
+		tick(),
+	)
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+func fetchMessages(store *sqlite.APIKeyStore) tea.Cmd {
+	return func() tea.Msg {
+		msgs, err := store.ListAllAgentMessages(context.Background())
+		if err != nil {
+			return refreshErrMsg(err)
+		}
+		return refreshedMsg(msgs)
+	}
+}
+
+func sendReply(store *sqlite.APIKeyStore, keyName, message string) tea.Cmd {
+	return func() tea.Msg {
+		if err := store.CreateInboxMessage(context.Background(), keyName, message); err != nil {
+			return replyErrMsg(err)
+		}
+		return replySentMsg{}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.list.SetSize(msg.Width, m.listHeight())
+		m.textarea.SetWidth(msg.Width - 4)
+		return m, nil
+
+	case tickMsg:
+		return m, tea.Batch(fetchMessages(m.store), tick())
+
+	case refreshedMsg:
+		m.messages = []sqlite.AgentMessageWithKeyName(msg)
+		m.lastRefresh = time.Now()
+		m.err = nil
+		idx := m.list.Index()
+		items := make([]list.Item, len(m.messages))
+		for i, v := range m.messages {
+			items[i] = msgItem{v}
+		}
+		m.list.SetItems(items)
+		if idx < len(items) {
+			m.list.Select(idx)
+		}
+		return m, nil
+
+	case refreshErrMsg:
+		m.err = error(msg)
+		return m, nil
+
+	case replySentMsg:
+		m.replying = false
+		m.textarea.Reset()
+		m.selected = nil
+		m.statusMsg = "Reply sent."
+		m.err = nil
+		m.list.SetSize(m.width, m.listHeight())
+		return m, nil
+
+	case replyErrMsg:
+		m.err = error(msg)
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.replying {
+			return m.updateReplying(msg)
+		}
+		return m.updateBrowsing(msg)
+	}
+
+	if m.replying {
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(msg)
+		return m, cmd
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "enter":
+		item, ok := m.list.SelectedItem().(msgItem)
+		if !ok || len(m.messages) == 0 {
+			return m, nil
+		}
+		selected := item.msg
+		m.selected = &selected
+		m.replying = true
+		m.textarea.Reset()
+		m.textarea.Focus()
+		m.list.SetSize(m.width, m.listHeight())
+		return m, textarea.Blink
+
+	case "r":
+		return m, fetchMessages(m.store)
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m model) updateReplying(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "esc":
+		m.replying = false
+		m.textarea.Reset()
+		m.selected = nil
+		m.statusMsg = ""
+		m.list.SetSize(m.width, m.listHeight())
+		return m, nil
+
+	case "enter":
+		text := strings.TrimSpace(m.textarea.Value())
+		if text == "" {
+			return m, nil
+		}
+		return m, sendReply(m.store, m.selected.KeyName, text)
+	}
+
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	return m, cmd
+}
+
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
+
+func (m model) View() string {
+	if m.width == 0 {
+		return "Loading..."
+	}
+
+	var b strings.Builder
+
+	// Header
+	refreshStr := "never"
+	if !m.lastRefresh.IsZero() {
+		refreshStr = m.lastRefresh.Format("15:04:05")
+	}
+	header := fmt.Sprintf("INBOX  ·  %d message(s)  ·  refreshed %s  ·  [r] refresh  [q] quit",
+		len(m.messages), refreshStr)
+	b.WriteString(headerStyle.Render(header))
+	b.WriteString("\n")
+
+	// Message list
+	b.WriteString(m.list.View())
+
+	// Reply pane
+	if m.replying && m.selected != nil {
+		b.WriteString("\n")
+		title := fmt.Sprintf("Reply to %s", m.selected.KeyName)
+		inner := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Bold(true).Render(title),
+			m.textarea.View(),
+			hintStyle.Render("[enter] send  ·  [esc] cancel"),
+		)
+		b.WriteString(replyBorderStyle.Width(m.width - 2).Render(inner))
+	}
+
+	// Status / error line
+	b.WriteString("\n")
+	if m.err != nil {
+		b.WriteString(errorStyle.Render("error: " + m.err.Error()))
+	} else if m.statusMsg != "" {
+		b.WriteString(statusStyle.Render(m.statusMsg))
+	}
+
+	return b.String()
+}
+
+// listHeight returns how many terminal rows the list should occupy.
+func (m model) listHeight() int {
+	h := m.height
+	h -= 2 // header + its padding
+	h -= 1 // status line
+	if m.replying {
+		h -= 7 // reply pane: border top/bottom + title + textarea(2) + hint + blank
+	}
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+func main() {
+	_ = godotenv.Load()
+
+	dbPath := flag.String("db", "./storage/llm_guard.db", "path to sqlite database")
+	flag.Parse()
+
+	db, err := sqlite.OpenAndInit(*dbPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error opening database:", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	store := sqlite.NewAPIKeyStore(db)
+
+	p := tea.NewProgram(newModel(store), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}

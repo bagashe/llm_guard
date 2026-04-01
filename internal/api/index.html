@@ -118,18 +118,16 @@ Halt the pipeline and surface the reasons array if safe=false.</pre>
 
   <h2>Self-registration</h2>
   <p>
-    No account, no email. Agents register autonomously via proof-of-work (SHA-256, difficulty 25).
-    The challenge requires finding a nonce such that <code>SHA256(challenge_id + ":" + nonce)</code>
-    has 25 leading zero bits — this takes a few seconds of compute and serves as a lightweight
-    spam deterrent. The API key is returned exactly once — store it.
+    No account, no email. Agents register autonomously via proof-of-work: a short compute
+    challenge that takes a few seconds to solve and serves as a lightweight spam deterrent.
+    The API key is returned exactly once — store it.
   </p>
 
   <pre><span class="comment"># 1. get a challenge</span>
 curl -s -X POST https://yapguard.com/v1/register/challenge \
   -H "Content-Type: application/json" | jq .
 
-<span class="comment"># 2. solve SHA256(challenge_id + ":" + nonce) with 25 leading zero bits,
-#    then submit</span>
+<span class="comment"># 2. solve the proof-of-work challenge, then submit</span>
 curl -s -X POST https://yapguard.com/v1/register/solve \
   -H "Content-Type: application/json" \
   -d '{"challenge_id":"&lt;id&gt;","nonce":"&lt;nonce&gt;"}' | jq .</pre>

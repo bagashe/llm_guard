@@ -413,7 +413,8 @@
           "message": {
             "type": "string",
             "minLength": 1,
-            "description": "Message content to store."
+            "maxLength": 512,
+            "description": "Message content to store. Maximum 512 bytes."
           }
         }
       },

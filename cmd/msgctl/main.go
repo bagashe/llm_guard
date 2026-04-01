@@ -70,15 +70,11 @@ func runList(args []string) error {
 	tw := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tKEY_NAME\tCREATED_AT\tMESSAGE")
 	for _, m := range msgs {
-		msg := m.Message
-		if len(msg) > 80 {
-			msg = msg[:77] + "..."
-		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n",
 			m.ID,
 			m.KeyName,
 			m.CreatedAt.UTC().Format(time.RFC3339),
-			msg,
+			m.Message,
 		)
 	}
 	return tw.Flush()

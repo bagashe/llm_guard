@@ -348,6 +348,10 @@ func handlePostMessage(w http.ResponseWriter, r *http.Request, dep Dependencies)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
+	if len(req.Message) > 512 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message must not exceed 512 bytes"})
+		return
+	}
 
 	if _, err := dep.ChallengeStore.VerifySolution(req.ChallengeID, req.Nonce); err != nil {
 		switch {

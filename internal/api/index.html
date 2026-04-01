@@ -58,10 +58,12 @@
       font-size: 0.82rem;
     }
     .privacy-note strong { color: #999; }
+    .privacy-note p { color: #666; font-size: 0.82rem; margin-bottom: 0.5rem; }
 
     .endpoints { font-size: 0.85rem; }
     .endpoints td { padding: 0.2rem 1rem 0.2rem 0; color: #888; vertical-align: top; }
     .endpoints td:first-child { color: #7eb8f7; white-space: nowrap; }
+    .endpoints tr.group-gap td { padding-top: 0.75rem; }
 
     hr { border: none; border-top: 1px solid #1e1e1e; margin: 2.5rem 0; }
   </style>
@@ -84,24 +86,24 @@
     <li>Dangerous tool calls — shell commands, SQL injection, blacklisted domains, internal network access</li>
     <li>Redirect chains that resolve to internal destinations</li>
     <li>System prompt leakage in assistant output</li>
-   <li>Secrets and credentials in tool results and LLM output</li>
+    <li>Secrets and credentials in tool results and LLM output</li>
   </ul>
 
   <h2>API</h2>
   <table class="endpoints">
     <tr><td>POST /v1/evaluate</td><td>Evaluate a message. Returns <code>safe</code>, <code>risk_score</code>, <code>reasons</code>.</td></tr>
-    <tr><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message to the operator).</td></tr>
+    <tr class="group-gap"><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message to the operator).</td></tr>
     <tr><td>POST /v1/messages</td><td>Send a message to the service operator (auth + solved challenge required).</td></tr>
     <tr><td>GET /v1/messages</td><td>List messages you have sent to the operator.</td></tr>
     <tr><td>GET /v1/messages/inbox</td><td>Read messages sent to you by the operator.</td></tr>
-    <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
+    <tr class="group-gap"><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
     <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
-    <tr><td>GET /healthz</td><td>Health check.</td></tr>
+    <tr class="group-gap"><td>GET /healthz</td><td>Health check.</td></tr>
   </table>
   <p style="margin-top:0.75rem"><a href="/openapi.json">Full OpenAPI spec →</a></p>
 
   <h2>Integrate using Claude Code</h2>
-  <p>Point a coding agent at the spec and it will wire up the guard automatically. Example prompt:</p>
+  <p>If you're a developer integrating via an AI coding assistant, point it at the spec and it will wire up the guard automatically. Example prompt:</p>
   <pre><span class="comment"># paste into Claude Code</span>
 
 Fetch https://yapguard.com/openapi.json and integrate yapguard into
@@ -116,15 +118,17 @@ Halt the pipeline and surface the reasons array if safe=false.</pre>
 
   <h2>Self-registration</h2>
   <p>
-    No account, no email. Agents register autonomously via proof-of-work
-    (SHA-256, difficulty 26). The API key is returned exactly once — store it.
+    No account, no email. Agents register autonomously via proof-of-work (SHA-256, difficulty 25).
+    The challenge requires finding a nonce such that <code>SHA256(challenge_id + ":" + nonce)</code>
+    has 25 leading zero bits — this takes a few seconds of compute and serves as a lightweight
+    spam deterrent. The API key is returned exactly once — store it.
   </p>
 
   <pre><span class="comment"># 1. get a challenge</span>
 curl -s -X POST https://yapguard.com/v1/register/challenge \
   -H "Content-Type: application/json" | jq .
 
-<span class="comment"># 2. solve SHA256(challenge_id + ":" + nonce) with leading zero bits,
+<span class="comment"># 2. solve SHA256(challenge_id + ":" + nonce) with 25 leading zero bits,
 #    then submit</span>
 curl -s -X POST https://yapguard.com/v1/register/solve \
   -H "Content-Type: application/json" \
@@ -132,21 +136,23 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
 
   <div class="privacy-note">
     <strong>Privacy.</strong>
-    Message content is never logged. Each request produces one structured log line containing
-    only HTTP metadata, message category, tool name, and the safety outcome
-    (<code>safe</code>, <code>risk_score</code>, <code>reason_ids</code>).
-    Tool arguments and API keys are never written to logs.
-    Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
-    The service does not phone home, collect telemetry, or store request data beyond the SQLite
-    key/quota store and agent messages.
-<br>Sample log lines:
-<pre>level=info method=POST path=/v1/messages status=200 duration_ms=23 remote_addr=203.0.113.42 country=US message_type=tool_call tool_name="bash" input_bytes=1024 safe=true risk_score=0.00 reason_ids=[]
-level=info method=POST path=/v1/messages status=400 duration_ms=18 remote_addr=203.0.113.42 country=US message_type=user tool_name="na" input_bytes=312 safe=false risk_score=0.94 reason_ids=[prompt_injection,credential_exposure]</pre>
+    <p>
+      Message content is never logged. Each request produces one structured log line containing
+      only HTTP metadata, message category, tool name, and the safety outcome
+      (<code>safe</code>, <code>risk_score</code>, <code>reason_ids</code>).
+      Tool arguments and API keys are never written to logs.
+      Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
+      The service does not phone home, collect telemetry, or store request data beyond the SQLite
+      key/quota store and agent messages.
+    </p>
+    <p>Sample log lines:</p>
+    <pre>level=info method=POST path=/v1/evaluate status=200 duration_ms=23 remote_addr=203.0.113.42 country=US message_type=tool_call tool_name="bash" input_bytes=1024 safe=true risk_score=0.0000 reason_ids=none
+level=info method=POST path=/v1/evaluate status=400 duration_ms=18 remote_addr=203.0.113.42 country=US message_type=user tool_name="na" input_bytes=312 safe=false risk_score=0.9400 reason_ids=prompt_injection,credential_exposure</pre>
   </div>
 
   <hr>
   <p style="font-size:0.78rem; color:#444;">
-    <a href="/openapi.json">openapi.json</a> &nbsp;·&nbsp;
+    <a href="/openapi.json">openapi.json</a> &nbsp;·&nbsp; <a href="/llms.txt">llms.txt</a>
   </p>
 
 </body>

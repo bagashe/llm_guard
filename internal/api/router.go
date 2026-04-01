@@ -305,6 +305,7 @@ type statusRecorder struct {
 	messageType   string
 	toolName      string
 	toolArgs      string
+	countryCode   string
 }
 
 const maxAuditToolArgsLen = 512
@@ -342,6 +343,10 @@ func (r *statusRecorder) setAuditToolCallDetails(message string) {
 	r.toolArgs = args
 }
 
+func (r *statusRecorder) setCountryCode(v string) {
+	r.countryCode = v
+}
+
 type countingReader struct {
 	io.ReadCloser
 	n int64
@@ -375,8 +380,8 @@ func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Ha
 				toolNameField = rec.toolName
 			}
 			countryField := "na"
-			if cc, ok := r.Context().Value(countryCodeKey{}).(string); ok && cc != "" {
-				countryField = cc
+			if rec.countryCode != "" {
+				countryField = rec.countryCode
 			}
 
 			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
@@ -415,6 +420,16 @@ func setAuditMessageType(w http.ResponseWriter, messageType string) {
 func setAuditToolCallDetails(w http.ResponseWriter, message string) {
 	if setter, ok := w.(auditToolCallSetter); ok {
 		setter.setAuditToolCallDetails(message)
+	}
+}
+
+type countryCodeSetter interface {
+	setCountryCode(string)
+}
+
+func setCountryCode(w http.ResponseWriter, code string) {
+	if setter, ok := w.(countryCodeSetter); ok {
+		setter.setCountryCode(code)
 	}
 }
 
@@ -567,6 +582,7 @@ func countryBlockMiddleware(dep Dependencies) func(http.Handler) http.Handler {
 				return
 			}
 
+			setCountryCode(w, code)
 			ctx := context.WithValue(r.Context(), countryCodeKey{}, code)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

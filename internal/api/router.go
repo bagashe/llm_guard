@@ -40,6 +40,7 @@ type evaluateRequest struct {
 func NewRouter(dep Dependencies) http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestLoggingMiddleware(dep.Config.TrustProxyHeaders))
+	r.Use(countryBlockMiddleware(dep))
 
 	r.Get("/", serveIndex)
 	r.Get("/llms.txt", serveLLMsTXT)
@@ -49,7 +50,6 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Get("/openapi.json", serveOpenAPISpec)
 
 	r.Route("/v1", func(v1 chi.Router) {
-		v1.Use(countryBlockMiddleware(dep))
 
 		// Public self-registration endpoints (no auth required).
 		// Only mounted when both ChallengeStore and KeyCreator are provided.

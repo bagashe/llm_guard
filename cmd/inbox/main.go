@@ -86,7 +86,7 @@ func (i msgItem) FilterValue() string {
 // tea.Msg types
 // ---------------------------------------------------------------------------
 
-type tickMsg time.Time
+type secondTickMsg time.Time
 type refreshedMsg []sqlite.AgentMessageWithKeyName
 type refreshErrMsg error
 type replySentMsg struct{}
@@ -105,6 +105,7 @@ type model struct {
 	store       *sqlite.APIKeyStore
 	statusMsg   string
 	lastRefresh time.Time
+	nextRefresh time.Time
 	width       int
 	height      int
 	err         error
@@ -128,9 +129,10 @@ func newModel(store *sqlite.APIKeyStore) model {
 	ta.ShowLineNumbers = false
 
 	return model{
-		list:     l,
-		textarea: ta,
-		store:    store,
+		list:        l,
+		textarea:    ta,
+		store:       store,
+		nextRefresh: time.Now().Add(60 * time.Second),
 	}
 }
 
@@ -139,11 +141,11 @@ func newModel(store *sqlite.APIKeyStore) model {
 // ---------------------------------------------------------------------------
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchMessages(m.store), tick())
+	return tea.Batch(fetchMessages(m.store), tickEverySecond())
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tickEverySecond() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return secondTickMsg(t) })
 }
 
 func fetchMessages(store *sqlite.APIKeyStore) tea.Cmd {
@@ -179,8 +181,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetWidth(msg.Width - 4)
 		return m, nil
 
-	case tickMsg:
-		return m, tea.Batch(fetchMessages(m.store), tick())
+	case secondTickMsg:
+		cmds := []tea.Cmd{tickEverySecond()}
+		if !time.Time(msg).Before(m.nextRefresh) {
+			m.nextRefresh = time.Time(msg).Add(60 * time.Second)
+			cmds = append(cmds, fetchMessages(m.store))
+		}
+		return m, tea.Batch(cmds...)
 
 	case refreshedMsg:
 		m.messages = []sqlite.AgentMessageWithKeyName(msg)
@@ -251,6 +258,7 @@ func (m model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textarea.Blink
 
 	case "r":
+		m.nextRefresh = time.Now().Add(60 * time.Second)
 		return m, fetchMessages(m.store)
 	}
 
@@ -301,8 +309,12 @@ func (m model) View() string {
 	if !m.lastRefresh.IsZero() {
 		refreshStr = m.lastRefresh.Format("15:04:05")
 	}
-	header := fmt.Sprintf("INBOX  ·  %d message(s)  ·  refreshed %s  ·  [r] refresh  [q] quit",
-		len(m.messages), refreshStr)
+	countdown := int(time.Until(m.nextRefresh).Seconds()) + 1
+	if countdown < 0 {
+		countdown = 0
+	}
+	header := fmt.Sprintf("INBOX  ·  %d message(s)  ·  refreshed %s  ·  next in %ds  ·  [r] refresh  [q] quit",
+		len(m.messages), refreshStr, countdown)
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 

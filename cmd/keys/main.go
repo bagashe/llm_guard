@@ -124,6 +124,8 @@ func (i keyItem) FilterValue() string { return i.key.Name }
 // tea.Msg types
 // ---------------------------------------------------------------------------
 
+type secondTickMsg time.Time
+
 type refreshedMsg []sqlite.APIKeyRecord
 type refreshErrMsg error
 
@@ -151,6 +153,7 @@ type model struct {
 	store       *sqlite.APIKeyStore
 	statusMsg   string
 	lastRefresh time.Time
+	nextRefresh time.Time
 	width       int
 	height      int
 	err         error
@@ -170,7 +173,7 @@ func newModel(store *sqlite.APIKeyStore) model {
 	ti := textinput.New()
 	ti.CharLimit = 64
 
-	return model{list: l, input: ti, store: store}
+	return model{list: l, input: ti, store: store, nextRefresh: time.Now().Add(60 * time.Second)}
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +181,11 @@ func newModel(store *sqlite.APIKeyStore) model {
 // ---------------------------------------------------------------------------
 
 func (m model) Init() tea.Cmd {
-	return fetchKeys(m.store)
+	return tea.Batch(fetchKeys(m.store), tickEverySecond())
+}
+
+func tickEverySecond() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return secondTickMsg(t) })
 }
 
 func fetchKeys(store *sqlite.APIKeyStore) tea.Cmd {
@@ -252,6 +259,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(m.leftWidth(), m.contentHeight())
 		m.input.Width = msg.Width - 8
 		return m, nil
+
+	case secondTickMsg:
+		cmds := []tea.Cmd{tickEverySecond()}
+		if !time.Time(msg).Before(m.nextRefresh) {
+			m.nextRefresh = time.Time(msg).Add(60 * time.Second)
+			cmds = append(cmds, fetchKeys(m.store))
+		}
+		return m, tea.Batch(cmds...)
 
 	case refreshedMsg:
 		m.keys = []sqlite.APIKeyRecord(msg)
@@ -342,6 +357,7 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r", "R":
 		m.newKeyRaw = ""
 		m.newKeyName = ""
+		m.nextRefresh = time.Now().Add(60 * time.Second)
 		return m, fetchKeys(m.store)
 
 	case "n":
@@ -477,9 +493,13 @@ func (m model) View() string {
 	if !m.lastRefresh.IsZero() {
 		refreshStr = m.lastRefresh.Format("15:04:05")
 	}
+	countdown := int(time.Until(m.nextRefresh).Seconds()) + 1
+	if countdown < 0 {
+		countdown = 0
+	}
 	header := fmt.Sprintf(
-		"KEYS  ·  %d active (%d total)  ·  refreshed %s  ·  [n] new  [r] refresh  [q] quit",
-		activeCount, len(m.keys), refreshStr,
+		"KEYS  ·  %d active (%d total)  ·  refreshed %s  ·  next in %ds  ·  [n] new  [r] refresh  [q] quit",
+		activeCount, len(m.keys), refreshStr, countdown,
 	)
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")

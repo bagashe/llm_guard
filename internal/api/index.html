@@ -57,7 +57,18 @@
       color: #666;
       font-size: 0.82rem;
     }
-    .privacy-note strong { color: #999; }
+    .privacy-note .privacy-title {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #0d0d0d;
+      background: #5fdfb0;
+      padding: 0.1rem 0.5rem;
+      border-radius: 3px;
+      margin-bottom: 0.6rem;
+    }
     .privacy-note p { color: #666; font-size: 0.82rem; margin-bottom: 0.5rem; }
 
     .endpoints { font-size: 0.85rem; }
@@ -140,7 +151,7 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
   -d '{"challenge_id":"&lt;id&gt;","nonce":"&lt;nonce&gt;"}' | jq .</pre>
 
   <div class="privacy-note">
-    <strong>Privacy.</strong>
+    <span class="privacy-title">Privacy</span>
     <p>
       Message content is never logged. Each request produces one structured log line containing
       only HTTP metadata, message category, tool name, and the safety outcome

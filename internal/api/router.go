@@ -374,14 +374,19 @@ func requestLoggingMiddleware(trustProxyHeaders bool) func(http.Handler) http.Ha
 			if rec.toolName != "" {
 				toolNameField = rec.toolName
 			}
+			countryField := "na"
+			if cc, ok := r.Context().Value(countryCodeKey{}).(string); ok && cc != "" {
+				countryField = cc
+			}
 
 			safeField, riskScoreField, reasonIDsField := auditFieldsFromResponse(r.URL.Path, rec.status, rec.responseBody.Bytes())
-			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s message_type=%s tool_name=%q input_bytes=%d safe=%s risk_score=%s reason_ids=%s",
+			log.Printf("level=info method=%s path=%s status=%d duration_ms=%d remote_addr=%s country=%s message_type=%s tool_name=%q input_bytes=%d safe=%s risk_score=%s reason_ids=%s",
 				r.Method,
 				r.URL.Path,
 				rec.status,
 				time.Since(start).Milliseconds(),
 				clientIP,
+				countryField,
 				messageTypeField,
 				toolNameField,
 				cr.n,

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-kamal exec --reuse -c "msgctl messages list -db /app/storage/llm_guard.db"
+kamal app exec --reuse "msgctl messages list -db /app/storage/llm_guard.db"

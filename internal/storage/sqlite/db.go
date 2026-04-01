@@ -46,6 +46,25 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	last_used_at DATETIME,
 	usage_count INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS messages_from_agents (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	api_key_hash TEXT    NOT NULL,
+	challenge_id TEXT    NOT NULL UNIQUE,
+	message      TEXT    NOT NULL,
+	created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_messages_from_agents_api_key_hash
+	ON messages_from_agents (api_key_hash);
+
+CREATE TABLE IF NOT EXISTS messages_for_agents (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	api_key_hash TEXT    NOT NULL,
+	message      TEXT    NOT NULL,
+	created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_messages_for_agents_api_key_hash
+	ON messages_for_agents (api_key_hash);
 `
 	if _, err := db.Exec(schema); err != nil {
 		return err
@@ -82,6 +101,25 @@ type APIKeyRecord struct {
 	DailyLimit  *int64
 	DailyCount  int64
 	DailyWindow string
+}
+
+// ErrChallengeAlreadyUsed is returned when a challenge_id has already been
+// used to store a message (UNIQUE constraint on messages_from_agents.challenge_id).
+var ErrChallengeAlreadyUsed = errors.New("challenge already used for a message")
+
+type AgentMessageRecord struct {
+	ID          int64
+	APIKeyHash  string
+	ChallengeID string
+	Message     string
+	CreatedAt   time.Time
+}
+
+type InboxMessageRecord struct {
+	ID         int64
+	APIKeyHash string
+	Message    string
+	CreatedAt  time.Time
 }
 
 func NewAPIKeyStore(db *sql.DB) *APIKeyStore {
@@ -331,6 +369,74 @@ ORDER BY id ASC
 	}
 
 	return out, nil
+}
+
+func (s *APIKeyStore) StoreAgentMessage(ctx context.Context, rawKey, challengeID, message string) (AgentMessageRecord, error) {
+	const stmt = `INSERT INTO messages_from_agents (api_key_hash, challenge_id, message) VALUES (?, ?, ?)`
+	res, err := s.db.ExecContext(ctx, stmt, hashAPIKey(rawKey), challengeID, message)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: messages_from_agents.challenge_id") {
+			return AgentMessageRecord{}, ErrChallengeAlreadyUsed
+		}
+		return AgentMessageRecord{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return AgentMessageRecord{}, err
+	}
+	const q = `SELECT id, api_key_hash, challenge_id, message, created_at FROM messages_from_agents WHERE id = ?`
+	var rec AgentMessageRecord
+	err = s.db.QueryRowContext(ctx, q, id).Scan(&rec.ID, &rec.APIKeyHash, &rec.ChallengeID, &rec.Message, &rec.CreatedAt)
+	return rec, err
+}
+
+func (s *APIKeyStore) ListAgentMessages(ctx context.Context, rawKey string) ([]AgentMessageRecord, error) {
+	const q = `SELECT id, api_key_hash, challenge_id, message, created_at FROM messages_from_agents WHERE api_key_hash = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, q, hashAPIKey(rawKey))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AgentMessageRecord, 0)
+	for rows.Next() {
+		var rec AgentMessageRecord
+		if err := rows.Scan(&rec.ID, &rec.APIKeyHash, &rec.ChallengeID, &rec.Message, &rec.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (s *APIKeyStore) ListInboxMessages(ctx context.Context, rawKey string) ([]InboxMessageRecord, error) {
+	const q = `SELECT id, api_key_hash, message, created_at FROM messages_for_agents WHERE api_key_hash = ? ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, q, hashAPIKey(rawKey))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]InboxMessageRecord, 0)
+	for rows.Next() {
+		var rec InboxMessageRecord
+		if err := rows.Scan(&rec.ID, &rec.APIKeyHash, &rec.Message, &rec.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// DB returns the underlying *sql.DB. Intended for use in tests that need to
+// insert rows directly (e.g. seeding messages_for_agents).
+func (s *APIKeyStore) DB() *sql.DB {
+	return s.db
+}
+
+// HashAPIKey is the exported form of hashAPIKey for use in tests.
+func HashAPIKey(key string) string {
+	return hashAPIKey(key)
 }
 
 func hashAPIKey(key string) string {

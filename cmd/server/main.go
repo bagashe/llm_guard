@@ -123,6 +123,7 @@ func main() {
 		CountryResolver:     countryResolver,
 		ChallengeStore:      challengeStore,
 		KeyCreator:          keyCreator,
+		MessageStore:        keyStore,
 	})
 
 	srv := &http.Server{

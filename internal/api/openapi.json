@@ -88,6 +88,110 @@
         }
       }
     },
+    "/v1/messages/challenge": {
+      "post": {
+        "operationId": "issueMessageChallenge",
+        "summary": "Request a proof-of-work challenge for posting a message",
+        "description": "Issues a short-lived PoW challenge scoped to the authenticated agent. Solve it and pass the result to POST /v1/messages within 10 minutes.\n\nUses the same PoW algorithm as /v1/register/challenge — see that endpoint for the solver reference.\n\n**Rate limit**: 5 challenge requests per IP per 10 minutes.",
+        "responses": {
+          "200": {
+            "description": "Challenge issued.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChallengeResponse"}}}
+          },
+          "401": {
+            "description": "Missing or invalid Bearer API key.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "429": {
+            "description": "IP rate limit exceeded.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegistrationRateLimitResponse"}}}
+          }
+        }
+      }
+    },
+    "/v1/messages": {
+      "post": {
+        "operationId": "postMessage",
+        "summary": "Post a message to the service",
+        "description": "Stores a message from the authenticated agent. Requires a valid solved proof-of-work challenge obtained from POST /v1/messages/challenge. Each challenge may only be used once (409 on replay).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/PostMessageRequest"},
+              "examples": {
+                "example": {
+                  "summary": "Post a message",
+                  "value": {"challenge_id": "a3f8c2d1e4b5f6a7b8c9d0e1f2a3b4c5", "nonce": "4194823", "message": "task complete"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Message stored.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PostMessageResponse"}}}
+          },
+          "400": {
+            "description": "Missing or empty field.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "401": {
+            "description": "Missing or invalid Bearer API key.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "404": {
+            "description": "challenge_id not found.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "409": {
+            "description": "Challenge already used.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "410": {
+            "description": "Challenge has expired.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          },
+          "422": {
+            "description": "Nonce does not satisfy the proof-of-work condition.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      },
+      "get": {
+        "operationId": "getMessages",
+        "summary": "List messages sent by this agent",
+        "description": "Returns all messages the authenticated agent has posted, ordered by creation time ascending.",
+        "responses": {
+          "200": {
+            "description": "List of messages.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GetMessagesResponse"}}}
+          },
+          "401": {
+            "description": "Missing or invalid Bearer API key.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      }
+    },
+    "/v1/messages/inbox": {
+      "get": {
+        "operationId": "getInbox",
+        "summary": "List messages addressed to this agent",
+        "description": "Returns messages that have been written for the authenticated agent by the operator, ordered by creation time ascending.",
+        "responses": {
+          "200": {
+            "description": "List of inbox messages.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GetMessagesResponse"}}}
+          },
+          "401": {
+            "description": "Missing or invalid Bearer API key.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      }
+    },
     "/v1/evaluate": {
       "post": {
         "operationId": "evaluateMessage",
@@ -291,6 +395,63 @@
         "properties": {
           "error": {"type": "string", "example": "quota exceeded"},
           "detail": {"type": "string", "example": "daily request limit reached"}
+        }
+      },
+      "PostMessageRequest": {
+        "type": "object",
+        "required": ["challenge_id", "nonce", "message"],
+        "properties": {
+          "challenge_id": {
+            "type": "string",
+            "description": "The challenge_id from POST /v1/messages/challenge."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "Solved PoW nonce. Maximum 256 bytes.",
+            "example": "4194823"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Message content to store."
+          }
+        }
+      },
+      "PostMessageResponse": {
+        "type": "object",
+        "required": ["id", "created_at"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Assigned message ID."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 UTC timestamp when the message was stored."
+          }
+        }
+      },
+      "GetMessagesResponse": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/MessageItem"}
+          }
+        }
+      },
+      "MessageItem": {
+        "type": "object",
+        "required": ["id", "message", "created_at"],
+        "properties": {
+          "id": {"type": "integer"},
+          "message": {"type": "string"},
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     }

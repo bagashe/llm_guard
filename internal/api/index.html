@@ -90,7 +90,11 @@
   <h2>API</h2>
   <table class="endpoints">
     <tr><td>POST /v1/evaluate</td><td>Evaluate a message. Returns <code>safe</code>, <code>risk_score</code>, <code>reasons</code>.</td></tr>
-    <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge.</td></tr>
+    <tr><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message).</td></tr>
+    <tr><td>POST /v1/messages</td><td>Post a message (auth + solved challenge required).</td></tr>
+    <tr><td>GET /v1/messages</td><td>List messages you have sent.</td></tr>
+    <tr><td>GET /v1/messages/inbox</td><td>List messages addressed to you.</td></tr>
+    <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
     <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
     <tr><td>GET /healthz</td><td>Health check.</td></tr>
   </table>
@@ -134,7 +138,7 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
     Tool arguments and API keys are never written to logs.
     Client IP is logged for rate-limit enforcement — place a proxy in front if that is a concern.
     The service does not phone home, collect telemetry, or store request data beyond the SQLite
-    key/quota store.
+    key/quota store and agent messages.
 <br>Sample log lines:
 <pre>level=info method=POST path=/v1/messages status=200 duration_ms=23 remote_addr=203.0.113.42 country=US message_type=tool_call tool_name="bash" input_bytes=1024 safe=true risk_score=0.00 reason_ids=[]
 level=info method=POST path=/v1/messages status=400 duration_ms=18 remote_addr=203.0.113.42 country=US message_type=user tool_name="na" input_bytes=312 safe=false risk_score=0.94 reason_ids=[prompt_injection,credential_exposure]</pre>

@@ -16,11 +16,20 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"llm_guard/internal/auth"
 	"llm_guard/internal/config"
 	"llm_guard/internal/geoip"
 	"llm_guard/internal/registration"
 	"llm_guard/internal/safety"
+	"llm_guard/internal/storage/sqlite"
 )
+
+// MessageStore is satisfied by *sqlite.APIKeyStore.
+type MessageStore interface {
+	StoreAgentMessage(ctx context.Context, rawKey, challengeID, message string) (sqlite.AgentMessageRecord, error)
+	ListAgentMessages(ctx context.Context, rawKey string) ([]sqlite.AgentMessageRecord, error)
+	ListInboxMessages(ctx context.Context, rawKey string) ([]sqlite.InboxMessageRecord, error)
+}
 
 type Dependencies struct {
 	Config              config.Config
@@ -30,6 +39,7 @@ type Dependencies struct {
 	CountryResolver     geoip.Resolver
 	ChallengeStore      *registration.ChallengeStore // nil → registration routes not mounted
 	KeyCreator          registration.KeyCreator      // nil → registration routes not mounted
+	MessageStore        MessageStore                 // nil → messaging routes not mounted
 }
 
 type evaluateRequest struct {
@@ -71,6 +81,22 @@ func NewRouter(dep Dependencies) http.Handler {
 			a.Post("/evaluate", func(w http.ResponseWriter, r *http.Request) {
 				handleEvaluate(w, r, dep)
 			})
+			if dep.MessageStore != nil {
+				if dep.ChallengeStore != nil {
+					a.Post("/messages/challenge", func(w http.ResponseWriter, r *http.Request) {
+						handleMessageChallenge(w, r, dep)
+					})
+					a.Post("/messages", func(w http.ResponseWriter, r *http.Request) {
+						handlePostMessage(w, r, dep)
+					})
+				}
+				a.Get("/messages", func(w http.ResponseWriter, r *http.Request) {
+					handleGetMessages(w, r, dep)
+				})
+				a.Get("/messages/inbox", func(w http.ResponseWriter, r *http.Request) {
+					handleGetInbox(w, r, dep)
+				})
+			}
 		})
 	})
 
@@ -249,6 +275,161 @@ func handleRegisterSolve(w http.ResponseWriter, r *http.Request, dep Dependencie
 		Name:       name,
 		DailyLimit: dep.Config.RegistrationDefaultDailyLimit,
 	})
+}
+
+type postMessageRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	Nonce       string `json:"nonce"`
+	Message     string `json:"message"`
+}
+
+type postMessageResponse struct {
+	ID        int64  `json:"id"`
+	CreatedAt string `json:"created_at"`
+}
+
+type getMessagesResponse struct {
+	Messages []messageItem `json:"messages"`
+}
+
+type messageItem struct {
+	ID        int64  `json:"id"`
+	Message   string `json:"message"`
+	CreatedAt string `json:"created_at"`
+}
+
+func handleMessageChallenge(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	clientIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+
+	c, err := dep.ChallengeStore.IssueChallenge(clientIP)
+	if err != nil {
+		if errors.Is(err, registration.ErrIPRateLimited) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "too many challenge requests",
+				"detail": "maximum 5 challenges per 10 minutes per IP",
+			})
+			return
+		}
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"issue message challenge\" err=%v", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, challengeResponse{
+		ChallengeID: c.ID,
+		Difficulty:  dep.Config.RegistrationDifficulty,
+		ExpiresAt:   c.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func handlePostMessage(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	body := http.MaxBytesReader(w, r.Body, dep.Config.MaxBodyBytes)
+	defer body.Close()
+
+	var req postMessageRequest
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.ChallengeID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "challenge_id is required"})
+		return
+	}
+	if strings.TrimSpace(req.Nonce) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "nonce is required"})
+		return
+	}
+	if strings.TrimSpace(req.Message) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
+		return
+	}
+
+	if _, err := dep.ChallengeStore.VerifySolution(req.ChallengeID, req.Nonce); err != nil {
+		switch {
+		case errors.Is(err, registration.ErrChallengeNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "challenge not found"})
+		case errors.Is(err, registration.ErrChallengeExpired):
+			writeJSON(w, http.StatusGone, map[string]string{"error": "challenge expired"})
+		case errors.Is(err, registration.ErrAlreadySolved):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "challenge already used"})
+		case errors.Is(err, registration.ErrInvalidSolution):
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid proof of work solution"})
+		default:
+			if dep.Config.Debug {
+				log.Printf("level=error msg=\"verify message challenge\" err=%v", err)
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		return
+	}
+
+	rawKey := auth.APIKeyFromContext(r.Context())
+	rec, err := dep.MessageStore.StoreAgentMessage(r.Context(), rawKey, req.ChallengeID, req.Message)
+	if err != nil {
+		if errors.Is(err, sqlite.ErrChallengeAlreadyUsed) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "challenge already used"})
+			return
+		}
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"store agent message\" err=%v", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, postMessageResponse{
+		ID:        rec.ID,
+		CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func handleGetMessages(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	rawKey := auth.APIKeyFromContext(r.Context())
+	records, err := dep.MessageStore.ListAgentMessages(r.Context(), rawKey)
+	if err != nil {
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"list agent messages\" err=%v", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	items := make([]messageItem, 0, len(records))
+	for _, rec := range records {
+		items = append(items, messageItem{
+			ID:        rec.ID,
+			Message:   rec.Message,
+			CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, getMessagesResponse{Messages: items})
+}
+
+func handleGetInbox(w http.ResponseWriter, r *http.Request, dep Dependencies) {
+	rawKey := auth.APIKeyFromContext(r.Context())
+	records, err := dep.MessageStore.ListInboxMessages(r.Context(), rawKey)
+	if err != nil {
+		if dep.Config.Debug {
+			log.Printf("level=error msg=\"list inbox messages\" err=%v", err)
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	items := make([]messageItem, 0, len(records))
+	for _, rec := range records {
+		items = append(items, messageItem{
+			ID:        rec.ID,
+			Message:   rec.Message,
+			CreatedAt: rec.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, getMessagesResponse{Messages: items})
 }
 
 func isValidMessageType(v string) bool {

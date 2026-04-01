@@ -709,6 +709,7 @@ func newRegistrationRouter(t *testing.T, opts registrationRouterOpts) registrati
 		CountryResolver: stubGeoResolver{code: opts.geoCode, err: opts.geoErr},
 		ChallengeStore:  cs,
 		KeyCreator:      keyStore,
+		MessageStore:    keyStore,
 	})
 
 	return registrationTestEnv{handler: h, keyStore: keyStore, challengeStore: cs}
@@ -1000,4 +1001,266 @@ func TestRegistrationEndToEnd(t *testing.T) {
 	if !res.Safe {
 		t.Fatalf("expected safe=true for benign message, got reasons=%v", res.Reasons)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Messaging endpoint integration tests
+// ---------------------------------------------------------------------------
+
+// postJSONAuthed fires a POST with a JSON body and a Bearer token.
+func postJSONAuthed(t *testing.T, h http.Handler, path string, body any, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+// getAuthed fires a GET with a Bearer token.
+func getAuthed(t *testing.T, h http.Handler, path, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+// solveChallenge issues a challenge from the env and returns the challenge_id
+// and a valid nonce (difficulty=0 means nonce "0" always works).
+func solveChallenge(t *testing.T, env registrationTestEnv, key string) (challengeID, nonce string) {
+	t.Helper()
+	rr := postJSONAuthed(t, env.handler, "/v1/messages/challenge", nil, key)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("issue challenge: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp challengeResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode challenge response: %v", err)
+	}
+	return resp.ChallengeID, "0" // difficulty=0: nonce "0" satisfies 0 leading zero bits
+}
+
+func TestMessagingIntegration(t *testing.T) {
+	t.Run("challenge requires auth", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSON(t, env.handler, "/v1/messages/challenge", nil)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("challenge returns correct JSON shape", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSONAuthed(t, env.handler, "/v1/messages/challenge", nil, "seed-key")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp challengeResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.ChallengeID) != 32 {
+			t.Fatalf("expected 32-char challenge_id, got %d", len(resp.ChallengeID))
+		}
+		if resp.ExpiresAt == "" {
+			t.Fatal("expires_at must not be empty")
+		}
+	})
+
+	t.Run("post message happy path returns 201", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		cid, nonce := solveChallenge(t, env, "seed-key")
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"challenge_id": cid,
+			"nonce":        nonce,
+			"message":      "hello from agent",
+		}, "seed-key")
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("want 201, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp postMessageResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.ID <= 0 {
+			t.Fatalf("expected positive ID, got %d", resp.ID)
+		}
+		if resp.CreatedAt == "" {
+			t.Fatal("created_at must not be empty")
+		}
+	})
+
+	t.Run("post message missing challenge_id returns 400", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"nonce": "0", "message": "hi",
+		}, "seed-key")
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d", rr.Code)
+		}
+	})
+
+	t.Run("post message missing nonce returns 400", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"challenge_id": "abc", "message": "hi",
+		}, "seed-key")
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d", rr.Code)
+		}
+	})
+
+	t.Run("post message missing message returns 400", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"challenge_id": "abc", "nonce": "0",
+		}, "seed-key")
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d", rr.Code)
+		}
+	})
+
+	t.Run("post message with invalid nonce returns 422", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{difficulty: 4})
+		cid, _ := solveChallenge(t, env, "seed-key")
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"challenge_id": cid,
+			"nonce":        "definitely-wrong-nonce",
+			"message":      "hi",
+		}, "seed-key")
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("want 422, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("post message replay returns 409", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		cid, nonce := solveChallenge(t, env, "seed-key")
+		body := map[string]string{"challenge_id": cid, "nonce": nonce, "message": "first"}
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", body, "seed-key")
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("first post: want 201, got %d", rr.Code)
+		}
+		rr = postJSONAuthed(t, env.handler, "/v1/messages", body, "seed-key")
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("replay: want 409, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("get messages empty returns empty array", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := getAuthed(t, env.handler, "/v1/messages", "seed-key")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp getMessagesResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Messages == nil || len(resp.Messages) != 0 {
+			t.Fatalf("expected empty array, got %v", resp.Messages)
+		}
+	})
+
+	t.Run("get messages returns posted messages in order", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		for _, msg := range []string{"first", "second"} {
+			cid, nonce := solveChallenge(t, env, "seed-key")
+			rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+				"challenge_id": cid, "nonce": nonce, "message": msg,
+			}, "seed-key")
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("post %q: want 201, got %d", msg, rr.Code)
+			}
+		}
+		rr := getAuthed(t, env.handler, "/v1/messages", "seed-key")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("get: want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp getMessagesResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Messages) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(resp.Messages))
+		}
+		if resp.Messages[0].Message != "first" || resp.Messages[1].Message != "second" {
+			t.Fatalf("unexpected order: %v", resp.Messages)
+		}
+	})
+
+	t.Run("get messages isolation between agents", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		// Create a second key.
+		if err := env.keyStore.CreateAPIKey(t.Context(), "agent-b", "key-b"); err != nil {
+			t.Fatalf("create agent-b key: %v", err)
+		}
+		// Post a message as seed-key.
+		cid, nonce := solveChallenge(t, env, "seed-key")
+		rr := postJSONAuthed(t, env.handler, "/v1/messages", map[string]string{
+			"challenge_id": cid, "nonce": nonce, "message": "secret",
+		}, "seed-key")
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("post: want 201, got %d", rr.Code)
+		}
+		// agent-b should see no messages.
+		rr = getAuthed(t, env.handler, "/v1/messages", "key-b")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("get as agent-b: want 200, got %d", rr.Code)
+		}
+		var resp getMessagesResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Messages) != 0 {
+			t.Fatalf("agent-b should see 0 messages, got %d", len(resp.Messages))
+		}
+	})
+
+	t.Run("get inbox empty returns empty array", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		rr := getAuthed(t, env.handler, "/v1/messages/inbox", "seed-key")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp getMessagesResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Messages == nil || len(resp.Messages) != 0 {
+			t.Fatalf("expected empty array, got %v", resp.Messages)
+		}
+	})
+
+	t.Run("get inbox returns messages addressed to agent", func(t *testing.T) {
+		env := newRegistrationRouter(t, registrationRouterOpts{})
+		// Insert a row directly into messages_for_agents via the DB.
+		// We need the api_key_hash for "seed-key".
+		db := env.keyStore.DB()
+		hash := sqlite.HashAPIKey("seed-key")
+		if _, err := db.Exec(
+			`INSERT INTO messages_for_agents (api_key_hash, message) VALUES (?, ?)`,
+			hash, "operator message",
+		); err != nil {
+			t.Fatalf("insert inbox message: %v", err)
+		}
+		rr := getAuthed(t, env.handler, "/v1/messages/inbox", "seed-key")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp getMessagesResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Messages) != 1 || resp.Messages[0].Message != "operator message" {
+			t.Fatalf("unexpected inbox: %v", resp.Messages)
+		}
+	})
 }

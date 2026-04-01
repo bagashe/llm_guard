@@ -48,6 +48,9 @@ var (
 	emptyDetailStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#444444"))
 
+	hrStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#2a2a2a"))
+
 	replyBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#5fdfb0")).
@@ -317,6 +320,7 @@ func (m model) View() string {
 	header := fmt.Sprintf("INBOX  ·  %d message(s)  ·  refreshed %s  ·  next in %ds  ·  [r] refresh  [q] quit",
 		len(m.messages), refreshStr, countdown)
 	b.WriteString(headerStyle.Render(header))
+	b.WriteString(hrStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteString("\n")
 
 	// Split pane: list (left) | detail (right)
@@ -384,7 +388,7 @@ func (m model) leftWidth() int {
 // contentHeight returns the rows available for the list + detail split.
 func (m model) contentHeight() int {
 	h := m.height
-	h -= 2 // header + its padding
+	h -= 3 // header + its padding + hr
 	h -= 1 // status line
 	if m.replying {
 		h -= 7 // reply pane: border top/bottom + title + textarea(2) + hint + blank

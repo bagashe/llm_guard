@@ -75,6 +75,9 @@ var (
 	emptyDetailStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#444444"))
 
+	hrStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#2a2a2a"))
+
 	actionPaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#5fdfb0")).
@@ -502,6 +505,7 @@ func (m model) View() string {
 		activeCount, len(m.keys), refreshStr, countdown,
 	)
 	b.WriteString(headerStyle.Render(header))
+	b.WriteString(hrStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteString("\n")
 
 	// Split pane: list (left) | detail (right)

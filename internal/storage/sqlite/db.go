@@ -428,6 +428,66 @@ func (s *APIKeyStore) ListInboxMessages(ctx context.Context, rawKey string) ([]I
 	return out, rows.Err()
 }
 
+// AgentMessageWithKeyName is an AgentMessageRecord enriched with the
+// human-readable key name — used for the operator-facing messages list.
+type AgentMessageWithKeyName struct {
+	ID          int64
+	KeyName     string
+	APIKeyHash  string
+	ChallengeID string
+	Message     string
+	CreatedAt   time.Time
+}
+
+// ListAllAgentMessages returns every message from every agent, joined with the
+// api_keys table so the operator sees key names rather than raw hashes.
+// Messages are ordered by created_at ASC.
+func (s *APIKeyStore) ListAllAgentMessages(ctx context.Context) ([]AgentMessageWithKeyName, error) {
+	const q = `
+SELECT m.id, COALESCE(k.name, '(unknown)'), m.api_key_hash, m.challenge_id, m.message, m.created_at
+FROM messages_from_agents m
+LEFT JOIN api_keys k ON k.key_hash = m.api_key_hash
+ORDER BY m.created_at ASC`
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]AgentMessageWithKeyName, 0)
+	for rows.Next() {
+		var rec AgentMessageWithKeyName
+		if err := rows.Scan(&rec.ID, &rec.KeyName, &rec.APIKeyHash, &rec.ChallengeID, &rec.Message, &rec.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// CreateInboxMessage inserts a message into messages_for_agents addressed to
+// the agent identified by keyName. Returns an error if no active key with that
+// name exists.
+func (s *APIKeyStore) CreateInboxMessage(ctx context.Context, keyName, message string) error {
+	if keyName == "" {
+		return errors.New("key name is required")
+	}
+	if message == "" {
+		return errors.New("message is required")
+	}
+	const lookup = `SELECT key_hash FROM api_keys WHERE name = ? AND active = 1 LIMIT 1`
+	var keyHash string
+	if err := s.db.QueryRowContext(ctx, lookup, keyName).Scan(&keyHash); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no active api key found with name %q", keyName)
+		}
+		return err
+	}
+	const stmt = `INSERT INTO messages_for_agents (api_key_hash, message) VALUES (?, ?)`
+	_, err := s.db.ExecContext(ctx, stmt, keyHash, message)
+	return err
+}
+
 // DB returns the underlying *sql.DB. Intended for use in tests that need to
 // insert rows directly (e.g. seeding messages_for_agents).
 func (s *APIKeyStore) DB() *sql.DB {

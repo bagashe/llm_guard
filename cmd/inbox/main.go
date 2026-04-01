@@ -27,6 +27,26 @@ var (
 			Foreground(lipgloss.Color("#5fdfb0")).
 			PaddingBottom(1)
 
+	// Right detail pane: left border acts as the vertical divider.
+	rightPaneStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("#333333")).
+			Padding(0, 1)
+
+	detailLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#5fdfb0")).
+				Bold(true)
+
+	detailMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#555555"))
+
+	detailBodyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#cccccc"))
+
+	emptyDetailStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#444444"))
+
 	replyBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#5fdfb0")).
@@ -43,7 +63,7 @@ var (
 )
 
 // ---------------------------------------------------------------------------
-// List item
+// List item — shows agent name + timestamp; message lives in the detail pane.
 // ---------------------------------------------------------------------------
 
 type msgItem struct {
@@ -55,12 +75,11 @@ func (i msgItem) Title() string {
 }
 
 func (i msgItem) Description() string {
-	ts := i.msg.CreatedAt.UTC().Format("2006-01-02 15:04")
-	return fmt.Sprintf("%s  %s", ts, i.msg.Message)
+	return fmt.Sprintf("#%d · %s", i.msg.ID, i.msg.CreatedAt.UTC().Format("2006-01-02 15:04"))
 }
 
 func (i msgItem) FilterValue() string {
-	return i.msg.KeyName + " " + i.msg.Message
+	return i.msg.KeyName
 }
 
 // ---------------------------------------------------------------------------
@@ -78,21 +97,20 @@ type replyErrMsg error
 // ---------------------------------------------------------------------------
 
 type model struct {
-	list      list.Model
-	messages  []sqlite.AgentMessageWithKeyName
-	replying  bool
-	selected  *sqlite.AgentMessageWithKeyName
-	textarea  textarea.Model
-	store     *sqlite.APIKeyStore
-	statusMsg string
+	list        list.Model
+	messages    []sqlite.AgentMessageWithKeyName
+	replying    bool
+	selected    *sqlite.AgentMessageWithKeyName // reply target
+	textarea    textarea.Model
+	store       *sqlite.APIKeyStore
+	statusMsg   string
 	lastRefresh time.Time
-	width     int
-	height    int
-	err       error
+	width       int
+	height      int
+	err         error
 }
 
 func newModel(store *sqlite.APIKeyStore) model {
-	// List
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = true
 	l := list.New(nil, delegate, 0, 0)
@@ -102,7 +120,6 @@ func newModel(store *sqlite.APIKeyStore) model {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 
-	// Textarea
 	ta := textarea.New()
 	ta.Placeholder = "Type your reply..."
 	ta.CharLimit = 512
@@ -122,16 +139,11 @@ func newModel(store *sqlite.APIKeyStore) model {
 // ---------------------------------------------------------------------------
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
-		fetchMessages(m.store),
-		tick(),
-	)
+	return tea.Batch(fetchMessages(m.store), tick())
 }
 
 func tick() tea.Cmd {
-	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	return tea.Tick(60*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 func fetchMessages(store *sqlite.APIKeyStore) tea.Cmd {
@@ -163,7 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width, m.listHeight())
+		m.list.SetSize(m.leftWidth(), m.contentHeight())
 		m.textarea.SetWidth(msg.Width - 4)
 		return m, nil
 
@@ -195,7 +207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selected = nil
 		m.statusMsg = "Reply sent."
 		m.err = nil
-		m.list.SetSize(m.width, m.listHeight())
+		m.list.SetSize(m.leftWidth(), m.contentHeight())
 		return m, nil
 
 	case replyErrMsg:
@@ -235,7 +247,7 @@ func (m model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.replying = true
 		m.textarea.Reset()
 		m.textarea.Focus()
-		m.list.SetSize(m.width, m.listHeight())
+		m.list.SetSize(m.leftWidth(), m.contentHeight())
 		return m, textarea.Blink
 
 	case "r":
@@ -257,7 +269,7 @@ func (m model) updateReplying(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textarea.Reset()
 		m.selected = nil
 		m.statusMsg = ""
-		m.list.SetSize(m.width, m.listHeight())
+		m.list.SetSize(m.leftWidth(), m.contentHeight())
 		return m, nil
 
 	case "enter":
@@ -294,10 +306,18 @@ func (m model) View() string {
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
 
-	// Message list
-	b.WriteString(m.list.View())
+	// Split pane: list (left) | detail (right)
+	//   right pane overhead = 1 (border) + 1 (pad-left) + 1 (pad-right) = 3
+	contentH := m.contentHeight()
+	leftW := m.leftWidth()
+	rightInnerW := m.width - leftW - 3
 
-	// Reply pane
+	leftPane := lipgloss.NewStyle().Width(leftW).Height(contentH).Render(m.list.View())
+	rightPane := rightPaneStyle.Width(rightInnerW).Height(contentH).Render(m.renderDetail(rightInnerW, contentH))
+
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane))
+
+	// Reply pane (bottom, full-width)
 	if m.replying && m.selected != nil {
 		b.WriteString("\n")
 		title := fmt.Sprintf("Reply to %s", m.selected.KeyName)
@@ -320,8 +340,36 @@ func (m model) View() string {
 	return b.String()
 }
 
-// listHeight returns how many terminal rows the list should occupy.
-func (m model) listHeight() int {
+// renderDetail renders the right-hand message detail pane.
+func (m model) renderDetail(w, _ int) string {
+	item, ok := m.list.SelectedItem().(msgItem)
+	if !ok {
+		return emptyDetailStyle.Render("select a message to read it")
+	}
+	msg := item.msg
+	return lipgloss.JoinVertical(lipgloss.Left,
+		detailLabelStyle.Render(msg.KeyName),
+		detailMetaStyle.Render(fmt.Sprintf("#%d  ·  %s", msg.ID, msg.CreatedAt.UTC().Format("2006-01-02 15:04 UTC"))),
+		"",
+		detailBodyStyle.Width(w).Render(msg.Message),
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
+
+// leftWidth returns the width of the list pane (~38% of terminal).
+func (m model) leftWidth() int {
+	w := m.width * 38 / 100
+	if w < 28 {
+		w = 28
+	}
+	return w
+}
+
+// contentHeight returns the rows available for the list + detail split.
+func (m model) contentHeight() int {
 	h := m.height
 	h -= 2 // header + its padding
 	h -= 1 // status line

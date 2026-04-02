@@ -27,6 +27,7 @@ type Config struct {
 	RateLimitRPS                  float64
 	RateLimitBurst                int
 	Debug                         bool
+	LogFilePath                   string
 }
 
 func LoadFromEnv() Config {
@@ -52,6 +53,7 @@ func LoadFromEnv() Config {
 		RateLimitRPS:                  getFloat("RATE_LIMIT_RPS", 10),
 		RateLimitBurst:                getInt("RATE_LIMIT_BURST", 20),
 		Debug:                         getBool("DEBUG", false),
+		LogFilePath:                   getString("LOG_FILE", ""),
 	}
 }
 

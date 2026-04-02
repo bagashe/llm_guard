@@ -38,6 +38,7 @@ env:
     RATE_LIMIT_RPS: "10"
     RATE_LIMIT_BURST: "20"
     DEBUG: "false"
+    LOG_FILE: /app/storage/server.log
     REGISTRATION_ENABLED: "true"
     REGISTRATION_DIFFICULTY: "26"
     REGISTRATION_DEFAULT_DAILY_LIMIT: "1000"

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,14 @@ func main() {
 	_ = godotenv.Load()
 
 	cfg := config.LoadFromEnv()
+	if cfg.LogFilePath != "" {
+		lf, err := os.OpenFile(cfg.LogFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			log.Fatalf("open log file: %v", err)
+		}
+		defer lf.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, lf))
+	}
 	if cfg.Debug {
 		log.Println("WARNING: DEBUG=true enables verbose request audit logging (tool_args and safety fields); disable in production")
 	}

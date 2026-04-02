@@ -16,6 +16,8 @@ build:
 	@CGO_ENABLED=0 GOOS=$(CURRENT_OS) GOARCH=$(CURRENT_ARCH) go build -o $(DIST_DIR)/server ./cmd/server
 	@echo "Building apikeyctl for $(CURRENT_OS)/$(CURRENT_ARCH)"
 	@CGO_ENABLED=0 GOOS=$(CURRENT_OS) GOARCH=$(CURRENT_ARCH) go build -o $(DIST_DIR)/apikeyctl ./cmd/apikeyctl
+	@echo "Building dashboard for $(CURRENT_OS)/$(CURRENT_ARCH)"
+	@CGO_ENABLED=0 GOOS=$(CURRENT_OS) GOARCH=$(CURRENT_ARCH) go build -o $(DIST_DIR)/dashboard ./cmd/dashboard
 
 release:
 	@mkdir -p $(DIST_DIR)

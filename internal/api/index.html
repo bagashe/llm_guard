@@ -71,6 +71,14 @@
     }
     .privacy-note p { color: #666; font-size: 0.82rem; margin-bottom: 0.5rem; }
 
+    .data-sharing-note {
+      border-left-color: #3a3322;
+    }
+    .data-sharing-note .privacy-title {
+      background: #f2c879;
+      color: #1b160a;
+    }
+
     .endpoints { font-size: 0.85rem; }
     .endpoints td { padding: 0.2rem 1rem 0.2rem 0; color: #888; vertical-align: top; }
     .endpoints td:first-child { color: #7eb8f7; white-space: nowrap; }
@@ -89,26 +97,27 @@
     Evaluates messages before they reach the model and before output reaches users,
     blocking prompt injection, PII leakage, credential exposure, dangerous tool calls, and more.
   </p>
-  <p>
-    Integration is not all-or-nothing. If you want to minimize data sharing with a third-party
-    service, you can use yapguard exclusively for tool-call evaluation —
-    so that web search and fetch tools can't download content from malicious or blacklisted
-    domains, reach internal network destinations, or follow redirect chains to unsafe locations.
-    No end-user prompts or assistant replies leave your pipeline.
-  </p>
-
-  <h2>Minimal data-sharing mode: tool-call only</h2>
-  <p>
-    Start with the lowest-friction integration: evaluate only <code>message_type=tool_call</code>
-    before execution. This gives you the highest-impact protections against host takeover patterns
-    while minimizing data sharing, since you do not send end-user prompts or assistant replies.
-  </p>
-  <ul>
-    <li>Blocks fetch/search destinations on blacklisted domains and internal/local networks</li>
-    <li>Follows redirects and fail-closes if a chain resolves to an unsafe destination</li>
-    <li>Flags dangerous shell and SQL patterns before any tool runs</li>
-    <li>Useful first step when full-message scanning is not yet approved by policy</li>
-  </ul>
+  <div class="privacy-note data-sharing-note">
+    <span class="privacy-title">Minimal Data Sharing</span>
+    <p>
+      Integration is not all-or-nothing. If you want to minimize data sharing with a third-party
+      service, you can use yapguard exclusively for tool-call evaluation —
+      so that web search and fetch tools can't download content from malicious or blacklisted
+      domains, reach internal network destinations, or follow redirect chains to unsafe locations.
+      No end-user prompts or assistant replies leave your pipeline.
+    </p>
+    <p>
+      Start with the lowest-friction integration: evaluate only <code>message_type=tool_call</code>
+      before execution. This gives you the highest-impact protections against host takeover patterns
+      while minimizing data sharing, since you do not send end-user prompts or assistant replies.
+    </p>
+    <ul>
+      <li>Blocks fetch/search destinations on blacklisted domains and internal/local networks</li>
+      <li>Follows redirects and fail-closes if a chain resolves to an unsafe destination</li>
+      <li>Flags dangerous shell and SQL patterns before any tool runs</li>
+      <li>Useful first step when full-message scanning is not yet approved by policy</li>
+    </ul>
+  </div>
 
   <h2>What it checks</h2>
   <ul>

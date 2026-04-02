@@ -440,7 +440,11 @@ func pollLog(path string, offset int64) tea.Cmd {
 func keysFingerprint(keys []sqlite.APIKeyRecord) string {
 	var sb strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&sb, "%d:%v:%d:%d:%v;", k.ID, k.Active, k.UsageCount, k.DailyCount, k.DailyLimit)
+		limit := int64(-1) // sentinel for nil (unlimited)
+		if k.DailyLimit != nil {
+			limit = *k.DailyLimit
+		}
+		fmt.Fprintf(&sb, "%d:%v:%d:%d:%d;", k.ID, k.Active, k.UsageCount, k.DailyCount, limit)
 	}
 	return sb.String()
 }

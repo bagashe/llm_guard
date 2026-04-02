@@ -79,10 +79,17 @@
       color: #1b160a;
     }
 
+    .decision-note {
+      border-left-color: #25314a;
+    }
+    .decision-note .privacy-title {
+      background: #8bb8ff;
+      color: #0a1220;
+    }
+
     .endpoints { font-size: 0.85rem; }
     .endpoints td { padding: 0.2rem 1rem 0.2rem 0; color: #888; vertical-align: top; }
     .endpoints td:first-child { color: #7eb8f7; white-space: nowrap; }
-    .endpoints tr.group-gap td { padding-top: 0.75rem; }
 
     hr { border: none; border-top: 1px solid #1e1e1e; margin: 2.5rem 0; }
   </style>
@@ -97,6 +104,14 @@
     Evaluates messages before they reach the model and before output reaches users,
     blocking prompt injection, PII leakage, credential exposure, dangerous tool calls, and more.
   </p>
+
+  <h2>Start in 3 steps</h2>
+  <ul>
+    <li>Register once via proof-of-work and store your API key</li>
+    <li>Call <code>POST /v1/evaluate</code> before executing tool calls</li>
+    <li>If <code>safe=false</code>, halt that step and surface <code>reasons</code></li>
+  </ul>
+
   <div class="privacy-note data-sharing-note">
     <span class="privacy-title">Minimal Data Sharing</span>
     <p>
@@ -119,6 +134,19 @@
     </ul>
   </div>
 
+  <h2>Then expand to full loop coverage</h2>
+  <ul>
+    <li><code>message_type=user</code> before model input</li>
+    <li><code>message_type=tool_call</code> before tool execution</li>
+    <li><code>message_type=tool_result</code> before returning tool output to the model</li>
+    <li><code>message_type=assistant</code> before returning final output to the caller</li>
+  </ul>
+
+  <div class="privacy-note decision-note">
+    <span class="privacy-title">Decision Contract</span>
+    <p><code>safe=true</code> continue pipeline · <code>safe=false</code> stop pipeline and return <code>reasons</code>.</p>
+  </div>
+
   <h2>What it checks</h2>
   <ul>
     <li>Prompt injection &amp; malicious intent (ML classifier)</li>
@@ -130,15 +158,28 @@
   </ul>
 
   <h2>API</h2>
+  <span class="label">Evaluate</span>
   <table class="endpoints">
     <tr><td>POST /v1/evaluate</td><td>Evaluate a message. Returns <code>safe</code>, <code>risk_score</code>, <code>reasons</code>.</td></tr>
-    <tr class="group-gap"><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message to the operator).</td></tr>
+  </table>
+
+  <span class="label" style="margin-top:0.75rem">Register</span>
+  <table class="endpoints">
+    <tr><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
+    <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
+  </table>
+
+  <span class="label" style="margin-top:0.75rem">Operator Messaging</span>
+  <table class="endpoints">
+    <tr><td>POST /v1/messages/challenge</td><td>Get a proof-of-work challenge (required before posting a message to the operator).</td></tr>
     <tr><td>POST /v1/messages</td><td>Send a message to the service operator (auth + solved challenge required).</td></tr>
     <tr><td>GET /v1/messages</td><td>List messages you have sent to the operator.</td></tr>
     <tr><td>GET /v1/messages/inbox</td><td>Read messages sent to you by the operator.</td></tr>
-    <tr class="group-gap"><td>POST /v1/register/challenge</td><td>Get a proof-of-work challenge for self-registration.</td></tr>
-    <tr><td>POST /v1/register/solve</td><td>Submit solution, receive API key (shown once).</td></tr>
-    <tr class="group-gap"><td>GET /healthz</td><td>Health check.</td></tr>
+  </table>
+
+  <span class="label" style="margin-top:0.75rem">Service</span>
+  <table class="endpoints">
+    <tr><td>GET /healthz</td><td>Health check.</td></tr>
   </table>
   <p style="margin-top:0.75rem"><a href="/openapi.json">Full OpenAPI spec →</a></p>
 
@@ -153,6 +194,7 @@ curl -s -X POST https://yapguard.com/v1/evaluate \
     "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"https://example.com/docs\"}}"
   }' | jq .
 
+<span class="comment"># allowed response</span>
 {
   "safe": true,
   "risk_score": 0.0,
@@ -168,6 +210,7 @@ curl -s -X POST https://yapguard.com/v1/evaluate \
     "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"http://127.0.0.1:8080/admin\"}}"
   }' | jq .
 
+<span class="comment"># blocked response</span>
 {
   "safe": false,
   "risk_score": 1.0,
@@ -179,6 +222,7 @@ curl -s -X POST https://yapguard.com/v1/evaluate \
     }
   ]
 }</pre>
+  <p>If blocked, do not execute the tool call. Return <code>reasons</code> to the caller or policy handler.</p>
 
   <h2>Integrate using Claude Code</h2>
   <p>If you're a developer integrating via an AI coding assistant, point it at the spec and it will wire up the guard automatically. Example prompt:</p>

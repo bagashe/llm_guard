@@ -225,7 +225,8 @@ type model struct {
 	keysKeys        []sqlite.APIKeyRecord
 	keysMode        keysMode
 	keysInput       textinput.Model
-	keysStatusMsg   string
+	keysStatusMsg  string
+	keysStatusTTL  int // seconds until keysStatusMsg is cleared
 	keysLastRefresh time.Time
 	keysNextRefresh time.Time
 	keysErr         error
@@ -238,7 +239,8 @@ type model struct {
 	inboxReplying    bool
 	inboxSelected    *sqlite.AgentMessageWithKeyName
 	inboxTextarea    textarea.Model
-	inboxStatusMsg   string
+	inboxStatusMsg string
+	inboxStatusTTL int // seconds until inboxStatusMsg is cleared
 	inboxLastRefresh time.Time
 	inboxNextRefresh time.Time
 	inboxErr         error
@@ -475,6 +477,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case secondTickMsg:
 		t := time.Time(msg)
+		if m.keysStatusMsg != "" {
+			m.keysStatusTTL--
+			if m.keysStatusTTL <= 0 {
+				m.keysStatusMsg = ""
+			}
+		}
+		if m.inboxStatusMsg != "" {
+			m.inboxStatusTTL--
+			if m.inboxStatusTTL <= 0 {
+				m.inboxStatusMsg = ""
+			}
+		}
 		cmds := []tea.Cmd{tickEverySecond()}
 		if !t.Before(m.keysNextRefresh) {
 			m.keysNextRefresh = t.Add(60 * time.Second)
@@ -518,6 +532,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keysNewKeyName = msg.name
 		m.keysNewKeyRaw = msg.raw
 		m.keysStatusMsg = fmt.Sprintf("Key %q created — copy the key shown on the right.", msg.name)
+		m.keysStatusTTL = 10
 		m.keysErr = nil
 		return m, fetchKeys(m.store)
 
@@ -527,6 +542,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case keyRevokedMsg:
 		m.keysStatusMsg = "Key revoked."
+		m.keysStatusTTL = 10
 		m.keysErr = nil
 		return m, fetchKeys(m.store)
 
@@ -536,6 +552,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case quotaSetMsg:
 		m.keysStatusMsg = "Quota updated."
+		m.keysStatusTTL = 10
 		m.keysErr = nil
 		return m, fetchKeys(m.store)
 
@@ -545,6 +562,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case quotaClearedMsg:
 		m.keysStatusMsg = "Quota cleared."
+		m.keysStatusTTL = 10
 		m.keysErr = nil
 		return m, fetchKeys(m.store)
 
@@ -580,6 +598,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inboxTextarea.Reset()
 		m.inboxSelected = nil
 		m.inboxStatusMsg = "Reply sent."
+		m.inboxStatusTTL = 10
 		m.inboxErr = nil
 		m.inboxList.SetSize(m.leftWidth(), m.inboxContentHeight())
 		return m, nil

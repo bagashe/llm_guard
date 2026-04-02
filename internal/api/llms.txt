@@ -2,6 +2,8 @@
 
 > Safety evaluation API for LLM agents. Screens messages for prompt injection, PII, credential leakage, dangerous tool calls, and malicious intent before they reach a model or user.
 
+Teams can run a minimal data-sharing mode by evaluating only `message_type=tool_call` before executing tools. This blocks unsafe domains, internal-network access, malicious redirect chains, and dangerous command/SQL patterns without sending user prompts or assistant replies.
+
 ## Docs
 
 - [OpenAPI spec](/openapi.json): Full API reference — endpoints, request/response schemas, authentication
@@ -19,5 +21,30 @@ Then call POST /v1/evaluate with Bearer auth on every message in the agent loop:
 - tool calls before execution
 - tool results before passing back to the LLM
 - assistant output before returning to the caller
+
+Concrete `tool_call` payload example:
+
+```json
+{
+  "message_type": "tool_call",
+  "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"http://127.0.0.1:8080/admin\"}}"
+}
+```
+
+Typical blocked response:
+
+```json
+{
+  "safe": false,
+  "risk_score": 1.0,
+  "reasons": [
+    {
+      "rule_id": "tool_call.internal_network_access",
+      "severity": "high",
+      "detail": "tool call targets internal/local destination(s): 127.0.0.1"
+    }
+  ]
+}
+```
 
 Halt the pipeline if safe=false.

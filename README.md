@@ -5,12 +5,13 @@ Go service for evaluating LLM input and output with API key auth, per-key rate l
 ## Features
 
 - REST API protected by Bearer API keys stored in SQLite
-- `POST /v1/evaluate` requires `message_type` (`user`, `system`, `tool_call`, `assistant`) and returns `safe`, `reasons`, and `risk_score`
+- `POST /v1/evaluate` requires `message_type` (`user`, `system`, `tool_call`, `tool_result`, `assistant`) and returns `safe`, `reasons`, and `risk_score`
 - Fail-closed policy support (`FAIL_CLOSED=true`)
 - Extensible rule engine with classifier-based malicious-intent detection
 - Input scanning: PII detection on user messages (email, SSN with invalid-range filtering, credit card with Luhn check, phone with NANP validation)
 - Output scanning: leaked system prompt detection and secret/credential detection (regex + Shannon entropy)
 - Tool-call scanning: domain blacklist, internal-network access controls, redirect resolution, dangerous command detection, dangerous SQL detection
+- Minimal data-sharing mode: evaluate only `message_type=tool_call` (no end-user prompts or assistant replies sent)
 - Country blacklist support via MaxMind-compatible `.mmdb` GeoIP DB
 - Country blacklist short-circuits evaluation before classifier scoring
 - Per-key rate limiting (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
@@ -209,6 +210,46 @@ curl http://localhost:8080/healthz
 
 4. Evaluate a message:
 
+Minimal data-sharing mode (tool-call only):
+
+```bash
+# allowed: external URL
+curl -X POST http://localhost:8080/v1/evaluate \
+  -H "Authorization: Bearer <your-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_type": "tool_call",
+    "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"https://example.com/docs\"}}"
+  }'
+
+# blocked: internal network destination
+curl -X POST http://localhost:8080/v1/evaluate \
+  -H "Authorization: Bearer <your-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_type": "tool_call",
+    "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"http://127.0.0.1:8080/admin\"}}"
+  }'
+```
+
+Expected blocked shape:
+
+```json
+{
+  "safe": false,
+  "risk_score": 1.0,
+  "reasons": [
+    {
+      "rule_id": "tool_call.internal_network_access",
+      "severity": "high",
+      "detail": "tool call targets internal/local destination(s): 127.0.0.1"
+    }
+  ]
+}
+```
+
+Full user-message scanning example:
+
 First, create an API key via `/v1/register/challenge` + `/v1/register/solve` (or `apikeyctl create`). Then call:
 
 ```bash
@@ -229,6 +270,7 @@ curl -X POST http://localhost:8080/v1/evaluate \
 - `assistant`: output scanning (system prompt leak detection, secret/credential detection).
 - `system`: currently pass-through (`safe=true`) while system-output checks are being added.
 - `tool_call`: tool-call safety evaluation (domain blacklist, internal-network access controls, redirect resolution, command policy, SQL policy).
+- `tool_result`: secret/credential scanning on tool outputs before returning to the model.
 
 ```json
 {
@@ -252,7 +294,7 @@ The service never logs message content, tool arguments, or API keys. Each reques
 |-------|-----------------|
 | `method`, `path`, `status`, `duration_ms` | HTTP request metadata |
 | `remote_addr` | **Client IP address** — logged for security auditing and rate-limit enforcement |
-| `message_type` | Category only (`user`, `system`, `tool_call`, `assistant`) — not content |
+| `message_type` | Category only (`user`, `system`, `tool_call`, `tool_result`, `assistant`) — not content |
 | `tool_name` | Tool name only — not arguments or payloads |
 | `safe`, `risk_score`, `reason_ids` | Safety evaluation outcome |
 

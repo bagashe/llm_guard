@@ -90,12 +90,25 @@
     blocking prompt injection, PII leakage, credential exposure, dangerous tool calls, and more.
   </p>
   <p>
-    Integration is not all-or-nothing. If you have privacy concerns about sending user messages
-    to a third-party service, you can use yapguard exclusively for tool call evaluation —
+    Integration is not all-or-nothing. If you want to minimize data sharing with a third-party
+    service, you can use yapguard exclusively for tool-call evaluation —
     so that web search and fetch tools can't download content from malicious or blacklisted
     domains, reach internal network destinations, or follow redirect chains to unsafe locations.
-    No user message content ever leaves your pipeline.
+    No end-user prompts or assistant replies leave your pipeline.
   </p>
+
+  <h2>Minimal data-sharing mode: tool-call only</h2>
+  <p>
+    Start with the lowest-friction integration: evaluate only <code>message_type=tool_call</code>
+    before execution. This gives you the highest-impact protections against host takeover patterns
+    while minimizing data sharing, since you do not send end-user prompts or assistant replies.
+  </p>
+  <ul>
+    <li>Blocks fetch/search destinations on blacklisted domains and internal/local networks</li>
+    <li>Follows redirects and fail-closes if a chain resolves to an unsafe destination</li>
+    <li>Flags dangerous shell and SQL patterns before any tool runs</li>
+    <li>Useful first step when full-message scanning is not yet approved by policy</li>
+  </ul>
 
   <h2>What it checks</h2>
   <ul>
@@ -119,6 +132,44 @@
     <tr class="group-gap"><td>GET /healthz</td><td>Health check.</td></tr>
   </table>
   <p style="margin-top:0.75rem"><a href="/openapi.json">Full OpenAPI spec →</a></p>
+
+  <h2>Concrete example (/v1/evaluate)</h2>
+  <p>Tool-call-only evaluation with one allowed request and one blocked request:</p>
+  <pre><span class="comment"># allowed: external URL, no dangerous patterns</span>
+curl -s -X POST https://yapguard.com/v1/evaluate \
+  -H "Authorization: Bearer $YAPGUARD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_type": "tool_call",
+    "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"https://example.com/docs\"}}"
+  }' | jq .
+
+{
+  "safe": true,
+  "risk_score": 0.0,
+  "reasons": []
+}
+
+<span class="comment"># blocked: localhost destination (internal network)</span>
+curl -s -X POST https://yapguard.com/v1/evaluate \
+  -H "Authorization: Bearer $YAPGUARD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_type": "tool_call",
+    "message": "{\"tool\":\"webfetch\",\"args\":{\"url\":\"http://127.0.0.1:8080/admin\"}}"
+  }' | jq .
+
+{
+  "safe": false,
+  "risk_score": 1.0,
+  "reasons": [
+    {
+      "rule_id": "tool_call.internal_network_access",
+      "severity": "high",
+      "detail": "tool call targets internal/local destination(s): 127.0.0.1"
+    }
+  ]
+}</pre>
 
   <h2>Integrate using Claude Code</h2>
   <p>If you're a developer integrating via an AI coding assistant, point it at the spec and it will wire up the guard automatically. Example prompt:</p>

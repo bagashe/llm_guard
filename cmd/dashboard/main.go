@@ -143,6 +143,12 @@ var (
 	logLineStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#aaaaaa"))
 
+	logLine4xxStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ffcc00"))
+
+	logLine5xxStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff5555"))
+
 	logNoFileStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666"))
 )
@@ -1165,6 +1171,31 @@ func (m model) renderInboxDetail(w int) string {
 // Logs tab view
 // ---------------------------------------------------------------------------
 
+// styleForLogLine picks a highlight style based on the HTTP status code
+// embedded in structured log lines (status=NNN).
+func styleForLogLine(line string) lipgloss.Style {
+	const marker = "status="
+	idx := strings.Index(line, marker)
+	if idx == -1 {
+		return logLineStyle
+	}
+	rest := line[idx+len(marker):]
+	end := strings.IndexByte(rest, ' ')
+	if end == -1 {
+		end = len(rest)
+	}
+	code := rest[:end]
+	if len(code) == 3 {
+		switch code[0] {
+		case '5':
+			return logLine5xxStyle
+		case '4':
+			return logLine4xxStyle
+		}
+	}
+	return logLineStyle
+}
+
 func (m model) viewLogs() string {
 	var b strings.Builder
 
@@ -1190,7 +1221,7 @@ func (m model) viewLogs() string {
 		rendered = append(rendered, "")
 	}
 	for _, l := range lines {
-		rendered = append(rendered, logLineStyle.Render(l))
+		rendered = append(rendered, styleForLogLine(l).Render(l))
 	}
 	b.WriteString(strings.Join(rendered, "\n"))
 	b.WriteString("\n")

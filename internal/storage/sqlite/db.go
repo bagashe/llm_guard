@@ -191,20 +191,25 @@ func (s *APIKeyStore) IsValidAPIKey(ctx context.Context, rawKey string) (bool, e
 		return false, err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if dailyLimit.Valid {
 		today := time.Now().UTC().Format("2006-01-02")
 		effective := dailyCount
 		if !dailyWindow.Valid || dailyWindow.String != today {
+			// New day: the DB count is from a prior window and any pending
+			// increments accumulated before the flush also belong to that
+			// window, so neither should count against today's quota.
 			effective = 0
+			delete(s.pending, id)
 		}
-		if effective >= dailyLimit.Int64 {
+		if effective+s.pending[id] >= dailyLimit.Int64 {
 			return false, quota.ErrDailyQuotaExceeded
 		}
 	}
 
-	s.mu.Lock()
 	s.pending[id]++
-	s.mu.Unlock()
 	return true, nil
 }
 

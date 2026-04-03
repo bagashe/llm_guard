@@ -75,9 +75,14 @@ func (v *Validator) Validate(ctx context.Context, key string) (bool, error) {
 		return false, err
 	}
 
-	v.mu.Lock()
-	v.cache[key] = cacheEntry{valid: valid, expiresAt: now.Add(cacheTTL)}
-	v.mu.Unlock()
+	// Do not cache valid=true: every request must reach IsValidAPIKey so the
+	// pending counter is incremented and checked against the daily quota.
+	// Cache valid=false briefly to avoid hammering the DB for dead/revoked keys.
+	if !valid {
+		v.mu.Lock()
+		v.cache[key] = cacheEntry{valid: false, expiresAt: now.Add(cacheTTL)}
+		v.mu.Unlock()
+	}
 
 	return valid, nil
 }

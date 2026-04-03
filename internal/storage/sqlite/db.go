@@ -75,8 +75,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_for_agents_api_key_hash
 		`ALTER TABLE api_keys ADD COLUMN daily_limit INTEGER`,
 		`ALTER TABLE api_keys ADD COLUMN daily_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE api_keys ADD COLUMN daily_window TEXT`,
-		`ALTER TABLE api_keys ADD COLUMN tool_allowlist TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE api_keys ADD COLUMN tool_denylist TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -94,17 +92,15 @@ type APIKeyStore struct {
 }
 
 type APIKeyRecord struct {
-	ID            int64
-	Name          string
-	Active        bool
-	CreatedAt     time.Time
-	LastUsedAt    *time.Time
-	UsageCount    int64
-	DailyLimit    *int64
-	DailyCount    int64
-	DailyWindow   string
-	ToolAllowlist string // comma-separated; empty means no allowlist restriction
-	ToolDenylist  string // comma-separated; empty means no denylist restriction
+	ID          int64
+	Name        string
+	Active      bool
+	CreatedAt   time.Time
+	LastUsedAt  *time.Time
+	UsageCount  int64
+	DailyLimit  *int64
+	DailyCount  int64
+	DailyWindow string
 }
 
 // ErrChallengeAlreadyUsed is returned when a challenge_id has already been
@@ -338,7 +334,7 @@ func (s *APIKeyStore) ClearDailyQuotaByName(ctx context.Context, name string) er
 
 func (s *APIKeyStore) ListAPIKeys(ctx context.Context) ([]APIKeyRecord, error) {
 	const q = `
-SELECT id, name, active, created_at, last_used_at, usage_count, daily_limit, daily_count, daily_window, tool_allowlist, tool_denylist
+SELECT id, name, active, created_at, last_used_at, usage_count, daily_limit, daily_count, daily_window
 FROM api_keys
 ORDER BY id ASC
 `
@@ -355,7 +351,7 @@ ORDER BY id ASC
 		var lastUsed sql.NullTime
 		var dailyLimit sql.NullInt64
 		var dailyWindow sql.NullString
-		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed, &rec.UsageCount, &dailyLimit, &rec.DailyCount, &dailyWindow, &rec.ToolAllowlist, &rec.ToolDenylist); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.Name, &activeInt, &rec.CreatedAt, &lastUsed, &rec.UsageCount, &dailyLimit, &rec.DailyCount, &dailyWindow); err != nil {
 			return nil, err
 		}
 		rec.Active = activeInt == 1
@@ -495,92 +491,6 @@ func (s *APIKeyStore) CreateInboxMessage(ctx context.Context, keyName, message s
 	const stmt = `INSERT INTO messages_for_agents (api_key_hash, message) VALUES (?, ?)`
 	_, err := s.db.ExecContext(ctx, stmt, keyHash, message)
 	return err
-}
-
-// GetToolPolicy returns the tool allowlist and denylist for the key identified
-// by rawKey. Both slices are nil when no policy is configured. Returns nil
-// slices (not an error) when the key is not found.
-func (s *APIKeyStore) GetToolPolicy(ctx context.Context, rawKey string) (allow []string, deny []string, err error) {
-	hash := hashAPIKey(rawKey)
-	const q = `SELECT tool_allowlist, tool_denylist FROM api_keys WHERE key_hash = ? AND active = 1 LIMIT 1`
-	var allowStr, denyStr string
-	err = s.db.QueryRowContext(ctx, q, hash).Scan(&allowStr, &denyStr)
-	if err == sql.ErrNoRows {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	return splitCSV(allowStr), splitCSV(denyStr), nil
-}
-
-func (s *APIKeyStore) SetToolAllowlistByID(ctx context.Context, id int64, list string) error {
-	const stmt = `UPDATE api_keys SET tool_allowlist = ? WHERE id = ?`
-	res, err := s.db.ExecContext(ctx, stmt, strings.TrimSpace(list), id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errors.New("no api key found with that id")
-	}
-	return nil
-}
-
-func (s *APIKeyStore) SetToolDenylistByID(ctx context.Context, id int64, list string) error {
-	const stmt = `UPDATE api_keys SET tool_denylist = ? WHERE id = ?`
-	res, err := s.db.ExecContext(ctx, stmt, strings.TrimSpace(list), id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errors.New("no api key found with that id")
-	}
-	return nil
-}
-
-func (s *APIKeyStore) ClearToolAllowlistByID(ctx context.Context, id int64) error {
-	const stmt = `UPDATE api_keys SET tool_allowlist = '' WHERE id = ?`
-	res, err := s.db.ExecContext(ctx, stmt, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errors.New("no api key found with that id")
-	}
-	return nil
-}
-
-func (s *APIKeyStore) ClearToolDenylistByID(ctx context.Context, id int64) error {
-	const stmt = `UPDATE api_keys SET tool_denylist = '' WHERE id = ?`
-	res, err := s.db.ExecContext(ctx, stmt, id)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errors.New("no api key found with that id")
-	}
-	return nil
-}
-
-// splitCSV splits a comma-separated string into a trimmed, non-empty slice.
-func splitCSV(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // DB returns the underlying *sql.DB. Intended for use in tests that need to

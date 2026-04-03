@@ -39,10 +39,12 @@ const (
 type keysMode int
 
 const (
-	keysBrowse        keysMode = iota
-	keysNewKeyName             // user typing a name for a new key
-	keysSetQuota               // user typing a daily quota
-	keysConfirmRevoke          // user confirming a revoke
+	keysBrowse           keysMode = iota
+	keysNewKeyName                // user typing a name for a new key
+	keysSetQuota                  // user typing a daily quota
+	keysConfirmRevoke             // user confirming a revoke
+	keysSetToolAllowlist          // user typing comma-separated tool allowlist
+	keysSetToolDenylist           // user typing comma-separated tool denylist
 )
 
 // ---------------------------------------------------------------------------
@@ -195,6 +197,14 @@ type quotaSetMsg struct{}
 type quotaSetErrMsg error
 type quotaClearedMsg struct{}
 type quotaClearErrMsg error
+type toolAllowlistSetMsg struct{}
+type toolAllowlistSetErrMsg error
+type toolAllowlistClearedMsg struct{}
+type toolAllowlistClearErrMsg error
+type toolDenylistSetMsg struct{}
+type toolDenylistSetErrMsg error
+type toolDenylistClearedMsg struct{}
+type toolDenylistClearErrMsg error
 
 // Inbox tab messages.
 type inboxRefreshedMsg []sqlite.AgentMessageWithKeyName
@@ -392,6 +402,42 @@ func doClearQuota(store *sqlite.APIKeyStore, id int64) tea.Cmd {
 	}
 }
 
+func doSetToolAllowlist(store *sqlite.APIKeyStore, id int64, list string) tea.Cmd {
+	return func() tea.Msg {
+		if err := store.SetToolAllowlistByID(context.Background(), id, list); err != nil {
+			return toolAllowlistSetErrMsg(err)
+		}
+		return toolAllowlistSetMsg{}
+	}
+}
+
+func doClearToolAllowlist(store *sqlite.APIKeyStore, id int64) tea.Cmd {
+	return func() tea.Msg {
+		if err := store.ClearToolAllowlistByID(context.Background(), id); err != nil {
+			return toolAllowlistClearErrMsg(err)
+		}
+		return toolAllowlistClearedMsg{}
+	}
+}
+
+func doSetToolDenylist(store *sqlite.APIKeyStore, id int64, list string) tea.Cmd {
+	return func() tea.Msg {
+		if err := store.SetToolDenylistByID(context.Background(), id, list); err != nil {
+			return toolDenylistSetErrMsg(err)
+		}
+		return toolDenylistSetMsg{}
+	}
+}
+
+func doClearToolDenylist(store *sqlite.APIKeyStore, id int64) tea.Cmd {
+	return func() tea.Msg {
+		if err := store.ClearToolDenylistByID(context.Background(), id); err != nil {
+			return toolDenylistClearErrMsg(err)
+		}
+		return toolDenylistClearedMsg{}
+	}
+}
+
 func sendReply(store *sqlite.APIKeyStore, keyName, message string) tea.Cmd {
 	return func() tea.Msg {
 		if err := store.CreateInboxMessage(context.Background(), keyName, message); err != nil {
@@ -446,7 +492,7 @@ func keysFingerprint(keys []sqlite.APIKeyRecord) string {
 		if k.DailyLimit != nil {
 			limit = *k.DailyLimit
 		}
-		fmt.Fprintf(&sb, "%d:%v:%d:%d:%d;", k.ID, k.Active, k.UsageCount, k.DailyCount, limit)
+		fmt.Fprintf(&sb, "%d:%v:%d:%d:%d:%s:%s;", k.ID, k.Active, k.UsageCount, k.DailyCount, limit, k.ToolAllowlist, k.ToolDenylist)
 	}
 	return sb.String()
 }
@@ -567,6 +613,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchKeys(m.store)
 
 	case quotaClearErrMsg:
+		m.keysErr = error(msg)
+		return m, nil
+
+	case toolAllowlistSetMsg:
+		m.keysStatusMsg = "Tool allowlist updated."
+		m.keysStatusTTL = 10
+		m.keysErr = nil
+		return m, fetchKeys(m.store)
+
+	case toolAllowlistSetErrMsg:
+		m.keysErr = error(msg)
+		return m, nil
+
+	case toolAllowlistClearedMsg:
+		m.keysStatusMsg = "Tool allowlist cleared."
+		m.keysStatusTTL = 10
+		m.keysErr = nil
+		return m, fetchKeys(m.store)
+
+	case toolAllowlistClearErrMsg:
+		m.keysErr = error(msg)
+		return m, nil
+
+	case toolDenylistSetMsg:
+		m.keysStatusMsg = "Tool denylist updated."
+		m.keysStatusTTL = 10
+		m.keysErr = nil
+		return m, fetchKeys(m.store)
+
+	case toolDenylistSetErrMsg:
+		m.keysErr = error(msg)
+		return m, nil
+
+	case toolDenylistClearedMsg:
+		m.keysStatusMsg = "Tool denylist cleared."
+		m.keysStatusTTL = 10
+		m.keysErr = nil
+		return m, fetchKeys(m.store)
+
+	case toolDenylistClearErrMsg:
 		m.keysErr = error(msg)
 		return m, nil
 
@@ -704,7 +790,7 @@ func (m model) isInputActive() bool {
 
 func (m model) updateKeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.keysMode {
-	case keysNewKeyName, keysSetQuota:
+	case keysNewKeyName, keysSetQuota, keysSetToolAllowlist, keysSetToolDenylist:
 		return m.updateKeysInput(msg)
 	case keysConfirmRevoke:
 		return m.updateKeysConfirmRevoke(msg)
@@ -760,6 +846,44 @@ func (m model) updateKeysBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, doClearQuota(m.store, item.key.ID)
+
+	case "a":
+		item, ok := m.keysList.SelectedItem().(keyItem)
+		if !ok || !item.key.Active {
+			return m, nil
+		}
+		m.keysMode = keysSetToolAllowlist
+		m.keysInput.Placeholder = "e.g. web_search,read_file"
+		m.keysInput.SetValue(item.key.ToolAllowlist)
+		m.keysInput.Focus()
+		m.keysList.SetSize(m.leftWidth(), m.keysContentHeight())
+		return m, textinput.Blink
+
+	case "A":
+		item, ok := m.keysList.SelectedItem().(keyItem)
+		if !ok || !item.key.Active {
+			return m, nil
+		}
+		return m, doClearToolAllowlist(m.store, item.key.ID)
+
+	case "d":
+		item, ok := m.keysList.SelectedItem().(keyItem)
+		if !ok || !item.key.Active {
+			return m, nil
+		}
+		m.keysMode = keysSetToolDenylist
+		m.keysInput.Placeholder = "e.g. bash,exec"
+		m.keysInput.SetValue(item.key.ToolDenylist)
+		m.keysInput.Focus()
+		m.keysList.SetSize(m.leftWidth(), m.keysContentHeight())
+		return m, textinput.Blink
+
+	case "D":
+		item, ok := m.keysList.SelectedItem().(keyItem)
+		if !ok || !item.key.Active {
+			return m, nil
+		}
+		return m, doClearToolDenylist(m.store, item.key.ID)
 	}
 
 	var cmd tea.Cmd
@@ -799,6 +923,18 @@ func (m model) updateKeysInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, doSetQuota(m.store, item.key.ID, limit)
+		case keysSetToolAllowlist:
+			item, ok := m.keysList.SelectedItem().(keyItem)
+			if !ok {
+				return m, nil
+			}
+			return m, doSetToolAllowlist(m.store, item.key.ID, val)
+		case keysSetToolDenylist:
+			item, ok := m.keysList.SelectedItem().(keyItem)
+			if !ok {
+				return m, nil
+			}
+			return m, doSetToolDenylist(m.store, item.key.ID, val)
 		}
 		return m, nil
 	}
@@ -1004,6 +1140,30 @@ func (m model) viewKeys() string {
 		)
 		b.WriteString(actionPaneStyle.Width(m.width - 2).Render(inner))
 
+	case keysSetToolAllowlist:
+		b.WriteString("\n")
+		item, _ := m.keysList.SelectedItem().(keyItem)
+		inner := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Bold(true).Render(
+				fmt.Sprintf("Tool allowlist for %s — comma-separated (empty = allow all)", item.key.Name),
+			),
+			m.keysInput.View(),
+			hintStyle.Render("[enter] save  ·  [esc] cancel"),
+		)
+		b.WriteString(actionPaneStyle.Width(m.width - 2).Render(inner))
+
+	case keysSetToolDenylist:
+		b.WriteString("\n")
+		item, _ := m.keysList.SelectedItem().(keyItem)
+		inner := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Bold(true).Render(
+				fmt.Sprintf("Tool denylist for %s — comma-separated (empty = deny none)", item.key.Name),
+			),
+			m.keysInput.View(),
+			hintStyle.Render("[enter] save  ·  [esc] cancel"),
+		)
+		b.WriteString(actionPaneStyle.Width(m.width - 2).Render(inner))
+
 	case keysConfirmRevoke:
 		b.WriteString("\n")
 		item, _ := m.keysList.SelectedItem().(keyItem)
@@ -1082,6 +1242,14 @@ func (m model) renderKeysDetail(w int) string {
 			detailFieldValStyle.Render(val),
 		)
 	}
+	allowPolicy := "allow all"
+	if k.ToolAllowlist != "" {
+		allowPolicy = k.ToolAllowlist
+	}
+	denyPolicy := "deny none"
+	if k.ToolDenylist != "" {
+		denyPolicy = k.ToolDenylist
+	}
 	lines := []string{
 		detailLabelStyle.Render(k.Name),
 		detailMetaStyle.Render(fmt.Sprintf("#%d  ·  %s", k.ID, activeStr)),
@@ -1090,10 +1258,13 @@ func (m model) renderKeysDetail(w int) string {
 		field("last used", lastUsed),
 		field("total uses", strconv.FormatInt(k.UsageCount, 10)),
 		field("quota", quota),
+		field("allow tools", allowPolicy),
+		field("deny tools", denyPolicy),
 	}
 	if k.Active {
 		lines = append(lines, "",
-			hintStyle.Render("[x] revoke  ·  [s] set quota  ·  [c] clear quota"),
+			hintStyle.Render("[x] revoke  ·  [s] quota  ·  [c] clear quota"),
+			hintStyle.Render("[a] allowlist  ·  [A] clear  ·  [d] denylist  ·  [D] clear"),
 		)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)

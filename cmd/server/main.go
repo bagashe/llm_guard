@@ -133,6 +133,7 @@ func main() {
 		ChallengeStore:      challengeStore,
 		KeyCreator:          keyCreator,
 		MessageStore:        keyStore,
+		ToolPolicyChecker:   keyStore,
 	})
 
 	srv := &http.Server{

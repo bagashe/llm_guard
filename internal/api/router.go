@@ -31,6 +31,11 @@ type MessageStore interface {
 	ListInboxMessages(ctx context.Context, rawKey string) ([]sqlite.InboxMessageRecord, error)
 }
 
+// ToolPolicyChecker is satisfied by *sqlite.APIKeyStore.
+type ToolPolicyChecker interface {
+	GetToolPolicy(ctx context.Context, rawKey string) (allow []string, deny []string, err error)
+}
+
 type Dependencies struct {
 	Config              config.Config
 	Engine              *safety.Engine
@@ -40,6 +45,7 @@ type Dependencies struct {
 	ChallengeStore      *registration.ChallengeStore // nil → registration routes not mounted
 	KeyCreator          registration.KeyCreator      // nil → registration routes not mounted
 	MessageStore        MessageStore                 // nil → messaging routes not mounted
+	ToolPolicyChecker   ToolPolicyChecker            // nil → no per-key tool policy enforcement
 }
 
 type evaluateRequest struct {
@@ -134,6 +140,37 @@ func handleEvaluate(w http.ResponseWriter, r *http.Request, dep Dependencies) {
 	if req.MessageType == string(safety.MessageTypeSystem) {
 		writeJSON(w, http.StatusOK, safety.Result{Safe: true, Reasons: []safety.Reason{}, RiskScore: 0})
 		return
+	}
+
+	if req.MessageType == string(safety.MessageTypeToolCall) && dep.ToolPolicyChecker != nil {
+		rawKey := auth.APIKeyFromContext(r.Context())
+		toolName, _ := extractToolCallAuditFields(req.Message)
+		allow, deny, policyErr := dep.ToolPolicyChecker.GetToolPolicy(r.Context(), rawKey)
+		if policyErr != nil {
+			if dep.Config.FailClosed {
+				writeJSON(w, http.StatusOK, safety.Result{
+					Safe:      false,
+					RiskScore: 1.0,
+					Reasons: []safety.Reason{{
+						RuleID:   "tool_policy.error",
+						Severity: "high",
+						Detail:   "failed to load tool policy for this key",
+					}},
+				})
+				return
+			}
+		} else if denied, reason := isToolDenied(toolName, allow, deny); denied {
+			writeJSON(w, http.StatusOK, safety.Result{
+				Safe:      false,
+				RiskScore: 1.0,
+				Reasons: []safety.Reason{{
+					RuleID:   "tool_policy.denied",
+					Severity: "high",
+					Detail:   reason,
+				}},
+			})
+			return
+		}
 	}
 
 	sourceIP := extractClientIP(r, dep.Config.TrustProxyHeaders)
@@ -719,6 +756,39 @@ func auditFieldsFromResponse(path string, status int, body []byte) (string, stri
 
 func floatToAuditString(v float64) string {
 	return strconv.FormatFloat(v, 'f', 4, 64)
+}
+
+// isToolDenied reports whether toolName is blocked by the key's tool policy.
+// allow: if non-empty, the tool must be in this list.
+// deny:  if non-empty, the tool must not be in this list.
+// If the tool name cannot be determined and an allowlist is configured, it is
+// denied (fail-closed); an empty denylist does not block unknown tool names.
+// Returns (true, reason) when denied, (false, "") when allowed.
+func isToolDenied(toolName string, allow, deny []string) (bool, string) {
+	if len(allow) == 0 && len(deny) == 0 {
+		return false, ""
+	}
+	tool := strings.ToLower(strings.TrimSpace(toolName))
+	if tool == "" || tool == "unknown" || tool == "unparsed" {
+		if len(allow) > 0 {
+			return true, "tool name could not be determined and an allowlist is configured for this key"
+		}
+		return false, ""
+	}
+	for _, d := range deny {
+		if strings.EqualFold(d, tool) {
+			return true, fmt.Sprintf("tool %q is in the denylist for this key", toolName)
+		}
+	}
+	if len(allow) > 0 {
+		for _, a := range allow {
+			if strings.EqualFold(a, tool) {
+				return false, ""
+			}
+		}
+		return true, fmt.Sprintf("tool %q is not in the allowlist for this key", toolName)
+	}
+	return false, ""
 }
 
 type countryCodeKey struct{}

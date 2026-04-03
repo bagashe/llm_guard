@@ -270,6 +270,16 @@ curl -s -X POST https://yapguard.com/v1/register/solve \
 level=info method=POST path=/v1/evaluate status=400 duration_ms=18 remote_addr=203.0.113.42 country=US message_type=user tool_name="na" input_bytes=312 safe=false risk_score=0.9400 reason_ids=prompt_injection,credential_exposure</pre>
   </div>
 
+  <div class="privacy-note" style="margin-top:2.5rem; border-left-color:#2a2a2a;">
+    <span class="privacy-title" style="background:#444; color:#ccc;">From the creator</span>
+    <p>
+      I built this for my own agents and figured it might be broadly useful, so I stood it up as a service.
+      If there's enough demand, I'm open to releasing the source. The service does require ongoing upkeep —
+      keeping the domain blacklists, classifiers, and detection rules current is real work — which is part
+      of why a maintained version is worth having.
+    </p>
+  </div>
+
   <hr>
   <p style="font-size:0.78rem; color:#444;">
     <a href="/openapi.json">openapi.json</a> &nbsp;·&nbsp; <a href="/llms.txt">llms.txt</a>

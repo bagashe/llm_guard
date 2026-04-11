@@ -1,4 +1,4 @@
-FROM golang:1.25.0 AS builder
+FROM golang:1.26.2@sha256:2a2b4b5791cea8ae09caecba7bad0bd9631def96e5fe362e4a5e67009fe4ae61 AS builder
 
 WORKDIR /src
 
@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server && \
     CGO_ENABLED=0 go build -o /out/msgctl ./cmd/msgctl && \
     CGO_ENABLED=0 go build -o /out/dashboard ./cmd/dashboard
 
-FROM alpine:3.22
+FROM alpine:3.22@sha256:55ae5d250caebc548793f321534bc6a8ef1d116f334f18f4ada1b2daad3251b2
 
 RUN addgroup -S -g 1000 app && adduser -S -u 1000 app -G app
 
